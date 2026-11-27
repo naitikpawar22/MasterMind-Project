@@ -212,10 +212,25 @@ public sealed class GeminiViewModel : ViewModelBase
                     : $"Microphone active ({_micState.ActiveDeviceName}) · Level {_micState.InputLevelPercent}% — Click to mute";
 
     // System Audio Loopback properties
+    public IReadOnlyList<SystemAudioDevice> SystemAudioDevices => _sysState.Devices;
+
+    public string SelectedSystemAudioDeviceId
+    {
+        get => _sysState.SelectedDeviceId;
+        set
+        {
+            if (!string.Equals(_sysState.SelectedDeviceId, value ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+            {
+                _systemAudioService.SelectDevice(value ?? string.Empty);
+            }
+        }
+    }
+
     public bool IsSystemAudioListening => _sysState.IsListening;
     public bool IsSystemAudioAvailable => _sysState.IsDeviceAvailable;
     public bool IsSystemAudioMuted => _sysState.IsMuted;
     public int SystemAudioLevelPercent => _sysState.OutputLevelPercent;
+    public IReadOnlyList<double> SystemAudioWaveformBars => _sysState.WaveformBars;
     public string SystemAudioDeviceName => _sysState.ActiveDeviceName;
     public string SystemAudioStatusText => _sysState.StatusText;
     public string SystemAudioErrorMessage => _sysState.ErrorMessage ?? string.Empty;
@@ -343,9 +358,18 @@ public sealed class GeminiViewModel : ViewModelBase
 
     private void ApplyMicrophoneState(MicrophoneState updated)
     {
+        var prev = _micState;
         _micState = updated;
-        OnPropertyChanged(nameof(MicrophoneDevices));
-        OnPropertyChanged(nameof(SelectedMicrophoneId));
+        if (!ReferenceEquals(prev.Devices, updated.Devices))
+        {
+            OnPropertyChanged(nameof(MicrophoneDevices));
+        }
+
+        if (!string.Equals(prev.SelectedDeviceId, updated.SelectedDeviceId, StringComparison.OrdinalIgnoreCase))
+        {
+            OnPropertyChanged(nameof(SelectedMicrophoneId));
+        }
+
         OnPropertyChanged(nameof(IsMicrophoneListening));
         OnPropertyChanged(nameof(IsMicrophoneAvailable));
         OnPropertyChanged(nameof(IsMicrophoneMuted));
@@ -377,11 +401,23 @@ public sealed class GeminiViewModel : ViewModelBase
 
     private void ApplySystemAudioState(SystemAudioState updated)
     {
+        var prev = _sysState;
         _sysState = updated;
+        if (!ReferenceEquals(prev.Devices, updated.Devices))
+        {
+            OnPropertyChanged(nameof(SystemAudioDevices));
+        }
+
+        if (!string.Equals(prev.SelectedDeviceId, updated.SelectedDeviceId, StringComparison.OrdinalIgnoreCase))
+        {
+            OnPropertyChanged(nameof(SelectedSystemAudioDeviceId));
+        }
+
         OnPropertyChanged(nameof(IsSystemAudioListening));
         OnPropertyChanged(nameof(IsSystemAudioAvailable));
         OnPropertyChanged(nameof(IsSystemAudioMuted));
         OnPropertyChanged(nameof(SystemAudioLevelPercent));
+        OnPropertyChanged(nameof(SystemAudioWaveformBars));
         OnPropertyChanged(nameof(SystemAudioDeviceName));
         OnPropertyChanged(nameof(SystemAudioStatusText));
         OnPropertyChanged(nameof(SystemAudioErrorMessage));

@@ -10,10 +10,27 @@ public enum AudioSourceKind
 }
 
 /// <summary>
-/// Snapshot of Windows playback (WASAPI loopback) capture, mute state, and real-time audio activity.
+/// Represents an active Windows playback (DataFlow.Render) device or smart loopback target.
+/// </summary>
+public sealed record SystemAudioDevice(
+    string Id,
+    string FriendlyName,
+    bool IsDefaultMultimedia = false,
+    bool IsDefaultCommunications = false,
+    bool IsAutoOption = false);
+
+/// <summary>
+/// Snapshot of Windows playback (WASAPI loopback) capture, mute state, waveform bars, and real-time audio activity.
 /// </summary>
 public sealed class SystemAudioState
 {
+    public static IReadOnlyList<double> CreateSilentWaveform(int barCount = 20, double baselineHeight = 3.0) =>
+        Enumerable.Repeat(baselineHeight, barCount).ToArray();
+
+    public IReadOnlyList<SystemAudioDevice> Devices { get; init; } = [];
+
+    public string SelectedDeviceId { get; init; } = string.Empty;
+
     public string ActiveDeviceId { get; init; } = string.Empty;
 
     public string ActiveDeviceName { get; init; } = "No playback device detected";
@@ -25,6 +42,8 @@ public sealed class SystemAudioState
     public double OutputLevel { get; init; }
 
     public int OutputLevelPercent => (int)Math.Round(Math.Clamp(OutputLevel, 0.0, 1.0) * 100.0);
+
+    public IReadOnlyList<double> WaveformBars { get; init; } = CreateSilentWaveform();
 
     public bool IsDeviceAvailable { get; init; }
 

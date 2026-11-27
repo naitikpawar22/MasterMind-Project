@@ -128,14 +128,14 @@ public static class AudioProcessingHelper
 
     /// <summary>
     /// Downmixes multi-channel audio (Float32 / PCM16 / PCM24 / PCM32) to mono and resamples
-    /// seamlessly via phase-continuous linear interpolation into 16 kHz, 16-bit signed PCM bytes.
+    /// to 16 kHz normalized float samples [-1.0, 1.0] using boxcar anti-aliasing when downsampling.
     /// </summary>
-    public static int ConvertToPcm16kMono(
+    public static int ConvertToFloat16kMono(
         ReadOnlySpan<byte> input,
         WaveFormat format,
         ref double phasePosition,
         ref float previousSample,
-        ref byte[] scratchBuffer)
+        ref float[] floatOutputBuffer)
     {
         if (input.IsEmpty || format is null || format.SampleRate <= 0 || format.Channels <= 0)
         {
@@ -181,28 +181,41 @@ public static class AudioProcessingHelper
 
             var step = (double)format.SampleRate / TargetSpeechSampleRate;
             var maxOutSamples = (int)Math.Ceiling(frameCount / step) + 4;
-            var requiredBytes = maxOutSamples * 2;
-            if (scratchBuffer.Length < requiredBytes)
+            if (floatOutputBuffer.Length < maxOutSamples)
             {
-                scratchBuffer = new byte[requiredBytes];
+                floatOutputBuffer = new float[maxOutSamples];
             }
 
             var outIdx = 0;
-            while (phasePosition < frameCount)
+            if (step >= 2.2)
             {
-                var idx = (int)Math.Floor(phasePosition);
-                var frac = (float)(phasePosition - idx);
+                // Light 3-tap [0.25, 0.50, 0.25] zero-phase anti-aliasing filter preserving 0-7.5 kHz speech consonants.
+                while (phasePosition < frameCount)
+                {
+                    var idx = (int)Math.Floor(phasePosition);
+                    var frac = (float)(phasePosition - idx);
 
-                var s0 = idx <= 0 ? previousSample : rentedMono[idx - 1];
-                var s1 = rentedMono[Math.Clamp(idx, 0, frameCount - 1)];
-                var interpolated = s0 + ((s1 - s0) * frac);
+                    var s0 = idx <= 0 ? previousSample : rentedMono[idx - 1];
+                    var s1 = rentedMono[Math.Clamp(idx, 0, frameCount - 1)];
+                    var s2 = rentedMono[Math.Clamp(idx + 1, 0, frameCount - 1)];
+                    var filtered = (0.25f * s0) + (0.50f * s1) + (0.25f * s2);
+                    var interp = s0 + ((s1 - s0) * frac);
+                    floatOutputBuffer[outIdx++] = Math.Clamp((0.6f * interp) + (0.4f * filtered), -1.0f, 1.0f);
+                    phasePosition += step;
+                }
+            }
+            else
+            {
+                while (phasePosition < frameCount)
+                {
+                    var idx = (int)Math.Floor(phasePosition);
+                    var frac = (float)(phasePosition - idx);
 
-                var scaled = (int)Math.Round(Math.Clamp(interpolated, -1.0f, 1.0f) * 32767.0f);
-                var pcmSample = (short)Math.Clamp(scaled, short.MinValue, short.MaxValue);
-                BinaryPrimitives.WriteInt16LittleEndian(scratchBuffer.AsSpan(outIdx, 2), pcmSample);
-
-                outIdx += 2;
-                phasePosition += step;
+                    var s0 = idx <= 0 ? previousSample : rentedMono[idx - 1];
+                    var s1 = rentedMono[Math.Clamp(idx, 0, frameCount - 1)];
+                    floatOutputBuffer[outIdx++] = Math.Clamp(s0 + ((s1 - s0) * frac), -1.0f, 1.0f);
+                    phasePosition += step;
+                }
             }
 
             phasePosition -= frameCount;
@@ -213,6 +226,57 @@ public static class AudioProcessingHelper
         {
             ArrayPool<float>.Shared.Return(rentedMono);
         }
+    }
+
+    /// <summary>
+    /// Downmixes multi-channel audio (Float32 / PCM16 / PCM24 / PCM32) to mono and resamples
+    /// cleanly via anti-aliased decimation / linear interpolation into 16 kHz, 16-bit signed PCM bytes.
+    /// </summary>
+    public static int ConvertToPcm16kMono(
+        ReadOnlySpan<byte> input,
+        WaveFormat format,
+        ref double phasePosition,
+        ref float previousSample,
+        ref byte[] scratchBuffer)
+    {
+        var floatBuf = ArrayPool<float>.Shared.Rent(Math.Max(64, (input.Length / Math.Max(1, format?.BlockAlign ?? 2)) + 8));
+        try
+        {
+            var sampleCount = ConvertToFloat16kMono(input, format!, ref phasePosition, ref previousSample, ref floatBuf);
+            if (sampleCount <= 0)
+            {
+                return 0;
+            }
+
+            return EncodeFloatToPcm16(floatBuf.AsSpan(0, sampleCount), ref scratchBuffer);
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(floatBuf);
+        }
+    }
+
+    public static int EncodeFloatToPcm16(ReadOnlySpan<float> samples, ref byte[] scratchBuffer)
+    {
+        if (samples.IsEmpty)
+        {
+            return 0;
+        }
+
+        var requiredBytes = samples.Length * 2;
+        if (scratchBuffer.Length < requiredBytes)
+        {
+            scratchBuffer = new byte[requiredBytes];
+        }
+
+        for (var i = 0; i < samples.Length; i++)
+        {
+            var scaled = (int)Math.Round(Math.Clamp(samples[i], -1.0f, 1.0f) * 32767.0f);
+            var pcmSample = (short)Math.Clamp(scaled, short.MinValue, short.MaxValue);
+            BinaryPrimitives.WriteInt16LittleEndian(scratchBuffer.AsSpan(i * 2, 2), pcmSample);
+        }
+
+        return requiredBytes;
     }
 
     private static float DecodeMonoChannelSample(ReadOnlySpan<byte> slice, int bitsPerSample, bool isFloat32)
@@ -404,8 +468,90 @@ public sealed class ContinuousPcmAudioStream : Stream
 }
 
 /// <summary>
-/// Reusable shared WASAPI stream recorder wrapper handling level smoothing, format conversion to 16 kHz PCM,
-/// and deadlock-free teardown for both DataFlow.Capture (microphone) and DataFlow.Render loopback (system audio).
+/// Callback receiving 16 kHz normalized mono float samples [-1.0, 1.0].
+/// </summary>
+public delegate void Float16kSpanHandler(ReadOnlySpan<float> float16kMonoSamples);
+
+/// <summary>
+/// Gentle automatic speech gain normalizer (AGC) that lifts quiet or Windows-ducked VoIP voices
+/// (Google Meet, Zoom, Teams) smoothly without pumping syllables or distorting speech formants.
+/// </summary>
+public sealed class AdaptiveSpeechGainProcessor
+{
+    private const float NoiseFloorRms = 0.0020f;
+    private const float TargetRms = 0.14f;
+    private const float MaxGain = 3.0f;
+    private const float PeakCeiling = 0.90f;
+
+    private float _currentGain = 1.0f;
+    private float _smoothedRms = 0.05f;
+
+    public void ProcessInPlace(Span<float> samples)
+    {
+        if (samples.IsEmpty)
+        {
+            return;
+        }
+
+        double sumSq = 0.0;
+        float blockPeak = 0f;
+        for (var i = 0; i < samples.Length; i++)
+        {
+            var s = samples[i];
+            sumSq += (double)s * s;
+            var abs = MathF.Abs(s);
+            if (abs > blockPeak)
+            {
+                blockPeak = abs;
+            }
+        }
+
+        var rms = MathF.Sqrt((float)(sumSq / samples.Length));
+        if (rms < NoiseFloorRms)
+        {
+            _currentGain += (1.0f - _currentGain) * 0.02f;
+            ApplyLinearGain(samples, _currentGain);
+            return;
+        }
+
+        var coeff = rms > _smoothedRms ? 0.08f : 0.015f;
+        _smoothedRms += (rms - _smoothedRms) * coeff;
+
+        var desiredGain = Math.Clamp(TargetRms / Math.Max(_smoothedRms, 0.008f), 1.0f, MaxGain);
+        if (blockPeak * desiredGain > PeakCeiling && blockPeak > 0.001f)
+        {
+            desiredGain = Math.Min(desiredGain, PeakCeiling / blockPeak);
+        }
+
+        var gainRate = desiredGain < _currentGain ? 0.20f : 0.03f;
+        _currentGain += (desiredGain - _currentGain) * gainRate;
+
+        ApplyLinearGain(samples, _currentGain);
+    }
+
+    public void Reset()
+    {
+        _currentGain = 1.0f;
+        _smoothedRms = 0.05f;
+    }
+
+    private static void ApplyLinearGain(Span<float> samples, float gain)
+    {
+        if (MathF.Abs(gain - 1.0f) < 0.02f)
+        {
+            return;
+        }
+
+        for (var i = 0; i < samples.Length; i++)
+        {
+            samples[i] = Math.Clamp(samples[i] * gain, -0.98f, 0.98f);
+        }
+    }
+}
+
+/// <summary>
+/// Reusable shared WASAPI stream recorder wrapper handling level smoothing, polling loopback with fallback,
+/// anti-aliased format conversion to 16 kHz PCM/float, and deadlock-free teardown.
 /// </summary>
 public sealed class WasapiStreamCaptureSession : IDisposable
 {
@@ -413,15 +559,19 @@ public sealed class WasapiStreamCaptureSession : IDisposable
     private readonly bool _isLoopback;
     private readonly Action<double> _onLevel;
     private readonly Action<Exception?> _onStoppedUnexpectedly;
+    private readonly AdaptiveSpeechGainProcessor _speechGain = new();
 
     private WasapiRecorder? _recorder;
     private WaveFormat? _activeWaveFormat;
     private MMDevice? _activeDevice;
     private Pcm16kSpanHandler? _pcmSink;
+    private Float16kSpanHandler? _floatSink;
     private double _smoothedLevel;
     private long _lastEmitTickMs;
+    private bool _lastEmittedZero = true;
     private double _resamplePhase;
     private float _previousMonoSample;
+    private float[] _floatResampleBuffer = new float[2048];
     private byte[] _resampleBuffer = new byte[4096];
     private volatile bool _capturing;
     private volatile bool _suppressOutput;
@@ -452,6 +602,8 @@ public sealed class WasapiStreamCaptureSession : IDisposable
 
     public void SetPcmSink(Pcm16kSpanHandler? sink) => Volatile.Write(ref _pcmSink, sink);
 
+    public void SetFloatSink(Float16kSpanHandler? sink) => Volatile.Write(ref _floatSink, sink);
+
     public void Start(MMDevice device, Action<MMDevice>? configureDevice = null)
     {
         ArgumentNullException.ThrowIfNull(device);
@@ -478,29 +630,65 @@ public sealed class WasapiStreamCaptureSession : IDisposable
             _activeDevice = device;
             configureDevice?.Invoke(device);
 
-            var builder = new WasapiRecorderBuilder()
-                .WithDevice(device)
-                .WithSharedMode()
-                .WithEventSync();
-            if (_isLoopback)
+            // Use PollingSync for WASAPI loopback (standard Microsoft/NAudio practice to prevent driver
+            // EventSync hangs on Realtek / Intel SST / Bluetooth HFP endpoints), with EventSync fallback.
+            var preferPolling = _isLoopback;
+            WasapiRecorder? recorder = null;
+            try
             {
-                builder.WithLoopbackCapture();
+                recorder = StartRecorderWithMode(device, _isLoopback, preferPolling);
             }
-
-            var recorder = builder.Build();
-            Volatile.Write(ref _activeWaveFormat, recorder.WaveFormat);
-            recorder.DataAvailable += OnDataAvailable;
-            recorder.RecordingStopped += OnRecordingStopped;
+            catch
+            {
+                recorder?.Dispose();
+                recorder = StartRecorderWithMode(device, _isLoopback, !preferPolling);
+            }
 
             _recorder = recorder;
             _smoothedLevel = 0.0;
             _lastEmitTickMs = 0;
+            _lastEmittedZero = true;
             _resamplePhase = 0.0;
             _previousMonoSample = 0f;
-            _capturing = true;
-
-            recorder.StartRecording();
+            _speechGain.Reset();
             Volatile.Write(ref _activeWaveFormat, recorder.WaveFormat);
+            _capturing = true;
+        }
+    }
+
+    private WasapiRecorder StartRecorderWithMode(MMDevice device, bool isLoopback, bool usePolling)
+    {
+        var builder = new WasapiRecorderBuilder()
+            .WithDevice(device)
+            .WithSharedMode();
+        if (usePolling)
+        {
+            builder.WithPollingSync();
+        }
+        else
+        {
+            builder.WithEventSync();
+        }
+
+        if (isLoopback)
+        {
+            builder.WithLoopbackCapture();
+        }
+
+        var recorder = builder.Build();
+        recorder.DataAvailable += OnDataAvailable;
+        recorder.RecordingStopped += OnRecordingStopped;
+        try
+        {
+            recorder.StartRecording();
+            return recorder;
+        }
+        catch
+        {
+            recorder.DataAvailable -= OnDataAvailable;
+            recorder.RecordingStopped -= OnRecordingStopped;
+            recorder.Dispose();
+            throw;
         }
     }
 
@@ -518,6 +706,7 @@ public sealed class WasapiStreamCaptureSession : IDisposable
             _activeDevice = null;
             Volatile.Write(ref _activeWaveFormat, null);
             _smoothedLevel = 0.0;
+            _lastEmittedZero = true;
         }
 
         if (oldRecorder is not null)
@@ -571,6 +760,7 @@ public sealed class WasapiStreamCaptureSession : IDisposable
             return;
         }
 
+        var now = Environment.TickCount64;
         var isSilent = _suppressOutput || (flags & AudioClientBufferFlags.Silent) != 0 || buffer.IsEmpty;
         var rawPeak = isSilent
             ? 0.0
@@ -578,26 +768,49 @@ public sealed class WasapiStreamCaptureSession : IDisposable
 
         var perceptual = rawPeak > 0.001 ? Math.Pow(rawPeak, 0.55) : 0.0;
         _smoothedLevel = Math.Max(perceptual, _smoothedLevel * 0.72);
+        var currentLevel = _smoothedLevel < 0.002 ? 0.0 : Math.Clamp(_smoothedLevel, 0.0, 1.0);
 
-        var now = Environment.TickCount64;
         if (now - _lastEmitTickMs >= 33)
         {
-            _lastEmitTickMs = now;
-            _onLevel(Math.Clamp(_smoothedLevel, 0.0, 1.0));
+            var isZero = currentLevel <= 0.0;
+            if (!isZero || !_lastEmittedZero)
+            {
+                _lastEmitTickMs = now;
+                _lastEmittedZero = isZero;
+                _onLevel(currentLevel);
+            }
         }
 
-        var sink = Volatile.Read(ref _pcmSink);
-        if (sink is not null && !isSilent)
+        var floatSink = Volatile.Read(ref _floatSink);
+        var pcmSink = Volatile.Read(ref _pcmSink);
+        if (floatSink is null && pcmSink is null || isSilent)
         {
-            var pcmBytes = AudioProcessingHelper.ConvertToPcm16kMono(
-                buffer,
-                format,
-                ref _resamplePhase,
-                ref _previousMonoSample,
-                ref _resampleBuffer);
-            if (pcmBytes > 0)
+            return;
+        }
+
+        var floatCount = AudioProcessingHelper.ConvertToFloat16kMono(
+            buffer,
+            format,
+            ref _resamplePhase,
+            ref _previousMonoSample,
+            ref _floatResampleBuffer);
+
+        if (floatCount > 0)
+        {
+            var floatSpan = _floatResampleBuffer.AsSpan(0, floatCount);
+            if (floatSink is not null)
             {
-                sink(_resampleBuffer.AsSpan(0, pcmBytes));
+                floatSink(floatSpan);
+            }
+
+            if (pcmSink is not null)
+            {
+                _speechGain.ProcessInPlace(floatSpan);
+                var pcmBytes = AudioProcessingHelper.EncodeFloatToPcm16(floatSpan, ref _resampleBuffer);
+                if (pcmBytes > 0)
+                {
+                    pcmSink(_resampleBuffer.AsSpan(0, pcmBytes));
+                }
             }
         }
     }

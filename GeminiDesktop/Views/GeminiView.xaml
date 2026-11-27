@@ -682,20 +682,72 @@
                                     </Border>
                                 </Grid>
 
-                                <TextBlock Text="{Binding SystemAudioDeviceName}"
-                                           FontSize="11.5"
-                                           FontWeight="Medium"
-                                           Foreground="{DynamicResource TextSecondaryBrush}"
-                                           TextTrimming="CharacterEllipsis"
-                                           Margin="0,0,0,6" />
-
-                                <!-- Live System Audio Meter -->
+                                <!-- Playback Device Picker + Refresh -->
                                 <Grid Margin="0,0,0,6">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox Grid.Column="0"
+                                              ItemsSource="{Binding SystemAudioDevices}"
+                                              SelectedValuePath="Id"
+                                              DisplayMemberPath="FriendlyName"
+                                              SelectedValue="{Binding SelectedSystemAudioDeviceId, Mode=TwoWay}"
+                                              FontSize="11.5"
+                                              Height="26"
+                                              Padding="6,2"
+                                              Margin="0,0,4,0"
+                                              ToolTip="Auto captures Windows Call (Communications) + Playback + all active headphones/speakers simultaneously" />
+                                    <Button Grid.Column="1"
+                                            Content="↻"
+                                            ToolTip="Refresh Playback Outputs"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Command="{Binding RefreshSystemAudioCommand}"
+                                            Padding="8,2"
+                                            FontSize="12" />
+                                </Grid>
+
+                                <!-- Live System Audio Waveform + Level Meter -->
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="36" />
                                     </Grid.ColumnDefinitions>
-                                    <ProgressBar Grid.Column="0"
+                                    <Border Grid.Column="0"
+                                            Height="24"
+                                            Background="{DynamicResource SurfaceSecondaryBrush}"
+                                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="4,1"
+                                            Margin="0,0,6,0"
+                                            ToolTip="Live System Audio Waveform">
+                                        <ItemsControl ItemsSource="{Binding SystemAudioWaveformBars}" VerticalAlignment="Bottom">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Width="3" Height="{Binding}" CornerRadius="1" Margin="0,0,1.5,0" VerticalAlignment="Bottom">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="Background" Value="{DynamicResource AccentPrimaryBrush}" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding DataContext.IsSystemAudioMuted, RelativeSource={RelativeSource AncestorType=ItemsControl}}" Value="True">
+                                                                        <Setter Property="Background" Value="{DynamicResource TextMutedBrush}" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Border.Style>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </Border>
+                                    <ProgressBar Grid.Column="1"
                                                  Height="8"
                                                  Minimum="0"
                                                  Maximum="100"
@@ -715,7 +767,7 @@
                                             </Style>
                                         </ProgressBar.Style>
                                     </ProgressBar>
-                                    <TextBlock Grid.Column="1"
+                                    <TextBlock Grid.Column="2"
                                                Text="{Binding SystemAudioLevelPercent, StringFormat={}{0}%}"
                                                FontSize="11"
                                                FontWeight="SemiBold"

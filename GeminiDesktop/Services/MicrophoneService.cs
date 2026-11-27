@@ -762,7 +762,8 @@ public sealed class MicrophoneService : IMicrophoneService
             }
 
             var effective = _isMuted ? 0.0 : level;
-            if (Math.Abs(_state.InputLevel - effective) < 0.008 && effective > 0.001)
+            var prev = _state.InputLevel;
+            if (Math.Abs(prev - effective) < 0.008 && (effective == 0.0) == (prev == 0.0))
             {
                 return;
             }

@@ -47,37 +47,91 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
 
     private sealed class FakeSystemAudioBackend : ISystemAudioBackend
     {
-        public string? DefaultId { get; set; } = "spk-default";
-        public string FriendlyName { get; set; } = "Speakers (Realtek Audio)";
-        public string? StartedId { get; private set; }
+        public List<SystemAudioDevice> AvailableDevices { get; } =
+        [
+            new SystemAudioDevice("spk-default", "Speakers (Realtek Audio)", IsDefaultMultimedia: true, IsDefaultCommunications: true)
+        ];
+
+        public IReadOnlyList<string> StartedIds { get; private set; } = [];
+        public string? StartedId => StartedIds.Count > 0 ? StartedIds[0] : null;
         public bool IsMutedSuppressed { get; private set; }
         public bool ThrowUnauthorizedOnStart { get; set; }
         public Pcm16kSpanHandler? PcmSink { get; private set; }
 
         public event EventHandler<double>? AudioLevelMeasured;
+        public event EventHandler<string>? ActiveEndpointDetected;
         public event EventHandler<Exception?>? CaptureStoppedUnexpectedly;
         public event EventHandler? DevicesTopologyChanged;
 
-        public string? ResolveDefaultRenderDevice(out string friendlyName)
+        public IReadOnlyList<SystemAudioDevice> EnumerateRenderDevices() => [.. AvailableDevices];
+
+        public IReadOnlyList<string> ResolveTargetRenderDevices(
+            string selectedOptionId,
+            out string displaySummary,
+            out string? fallbackNotice)
         {
-            friendlyName = FriendlyName;
-            return DefaultId;
+            fallbackNotice = null;
+            if (AvailableDevices.Count == 0)
+            {
+                displaySummary = "No playback device detected";
+                return [];
+            }
+
+            if (string.Equals(selectedOptionId, SystemAudioService.CommunicationsDefaultOptionId, StringComparison.OrdinalIgnoreCase))
+            {
+                var comm = AvailableDevices.FirstOrDefault(d => d.IsDefaultCommunications) ?? AvailableDevices[0];
+                displaySummary = comm.FriendlyName;
+                return [comm.Id];
+            }
+
+            if (string.Equals(selectedOptionId, SystemAudioService.MultimediaDefaultOptionId, StringComparison.OrdinalIgnoreCase))
+            {
+                var mult = AvailableDevices.FirstOrDefault(d => d.IsDefaultMultimedia) ?? AvailableDevices[0];
+                displaySummary = mult.FriendlyName;
+                return [mult.Id];
+            }
+
+            if (!string.IsNullOrWhiteSpace(selectedOptionId))
+            {
+                var exact = AvailableDevices.FirstOrDefault(d => string.Equals(d.Id, selectedOptionId, StringComparison.OrdinalIgnoreCase));
+                if (exact is not null)
+                {
+                    displaySummary = exact.FriendlyName;
+                    return [exact.Id];
+                }
+
+                fallbackNotice = $"Selected playback device disconnected — using {AvailableDevices[0].FriendlyName}";
+            }
+
+            // Auto prioritizes Communications first, then Multimedia, then others cleanly
+            var ordered = AvailableDevices
+                .OrderByDescending(d => d.IsDefaultCommunications)
+                .ThenByDescending(d => d.IsDefaultMultimedia)
+                .ToList();
+            displaySummary = ordered.Count == 1
+                ? ordered[0].FriendlyName
+                : $"Auto ({ordered.Count} outputs: {ordered[0].FriendlyName} + {ordered.Count - 1} more)";
+            return ordered.Select(d => d.Id).ToList();
         }
 
-        public void StartLoopbackCapture(string deviceId)
+        public void StartLoopbackCapture(IReadOnlyList<string> deviceIds, out IReadOnlyList<string> startedDeviceNames)
         {
             if (ThrowUnauthorizedOnStart)
             {
                 throw new UnauthorizedAccessException("OS denied audio loopback.");
             }
 
-            StartedId = deviceId;
+            StartedIds = [.. deviceIds];
+            startedDeviceNames = deviceIds
+                .Select(id => AvailableDevices.FirstOrDefault(d => d.Id == id)?.FriendlyName ?? id)
+                .ToList();
         }
 
-        public void StopCapture() => StartedId = null;
+        public void StopCapture() => StartedIds = [];
         public void SetMutedSuppression(bool muted) => IsMutedSuppressed = muted;
         public void SetPcmSink(Pcm16kSpanHandler? sink) => PcmSink = sink;
         public void EmitLevel(double level) => AudioLevelMeasured?.Invoke(this, level);
+        public void EmitActiveEndpoint(string name) => ActiveEndpointDetected?.Invoke(this, name);
         public void EmitDisconnect(Exception ex) => CaptureStoppedUnexpectedly?.Invoke(this, ex);
         public void EmitTopologyChange() => DevicesTopologyChanged?.Invoke(this, EventArgs.Empty);
         public void PushPcm(byte[] pcm) { if (!IsMutedSuppressed) PcmSink?.Invoke(pcm); }
@@ -222,27 +276,70 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
         sysBackend.EmitLevel(0.45);
         Assert.Equal(45, sysService.CurrentState.OutputLevelPercent);
 
-        // Stop & restart independently
+        // Stop & restart independently resets waveform when stopped, and resumes on live level
         sysService.StopListening();
         Assert.False(sysService.CurrentState.IsListening);
         Assert.Null(sysBackend.StartedId);
+        Assert.All(sysService.CurrentState.WaveformBars, h => Assert.Equal(3.0, h));
 
         sysService.StartListening();
         Assert.True(sysService.CurrentState.IsListening);
         Assert.Equal("spk-default", sysBackend.StartedId);
 
-        // Hot-plug switch from speakers to Bluetooth headphones
-        sysBackend.DefaultId = "bt-headphones";
-        sysBackend.FriendlyName = "WH-1000XM5 Headphones";
+        sysBackend.EmitLevel(0.65);
+        Assert.Equal(20, sysService.CurrentState.WaveformBars.Count);
+        Assert.Contains(sysService.CurrentState.WaveformBars, h => h > 3.0);
+
+        // Hot-plug switch from speakers to Bluetooth headphones (Dual output: Multimedia + Communications)
+        sysBackend.AvailableDevices[0] = new SystemAudioDevice("spk-default", "Speakers (Realtek Audio)", IsDefaultMultimedia: true, IsDefaultCommunications: false);
+        sysBackend.AvailableDevices.Add(new SystemAudioDevice("bt-hfp", "Headset Earphone (LOQ Hands-Free)", IsDefaultMultimedia: false, IsDefaultCommunications: true));
         sysService.RefreshDevice();
-        Assert.Equal("bt-headphones", sysService.CurrentState.ActiveDeviceId);
-        Assert.Equal("WH-1000XM5 Headphones", sysService.CurrentState.ActiveDeviceName);
+        Assert.Equal(2, sysBackend.StartedIds.Count);
+        Assert.Contains("bt-hfp", sysBackend.StartedIds);
+        Assert.Contains("spk-default", sysBackend.StartedIds);
+
+        // Selecting Windows Call Default targets only Communications output & persists to AppSettings
+        sysService.SelectDevice(SystemAudioService.CommunicationsDefaultOptionId);
+        Assert.Equal(["bt-hfp"], sysBackend.StartedIds);
+        Assert.Equal(SystemAudioService.CommunicationsDefaultOptionId, settings.CurrentSettings.PreferredSystemAudioDeviceId);
+
+        // Explicit Bluetooth disconnect falls back gracefully to Speakers
+        sysBackend.AvailableDevices.RemoveAll(d => d.Id == "bt-hfp");
+        sysService.RefreshDevice();
+        Assert.Equal("spk-default", sysService.CurrentState.ActiveDeviceId);
 
         // Zero playback devices available reports cleanly
-        sysBackend.DefaultId = null;
+        sysBackend.AvailableDevices.Clear();
         sysService.RefreshDevice();
         Assert.False(sysService.CurrentState.IsDeviceAvailable);
         Assert.False(sysService.CurrentState.IsListening);
+    }
+
+    [Fact]
+    public void AdaptiveSpeechGainProcessor_LiftsQuietCallVoiceWithoutAmplifyingNoiseFloor()
+    {
+        var agc = new AdaptiveSpeechGainProcessor();
+        var buffer = new float[1600]; // 100ms @ 16kHz
+
+        // Quiet speech (~ -30 dBFS, peak 0.03) should be lifted gently over continuous speech frames
+        for (var frame = 0; frame < 45; frame++)
+        {
+            for (var i = 0; i < buffer.Length; i++)
+            {
+                buffer[i] = 0.03f * MathF.Sin(2f * MathF.PI * 300f * i / 16000f);
+            }
+
+            agc.ProcessInPlace(buffer);
+        }
+
+        var boostedPeak = buffer.Max(MathF.Abs);
+        Assert.InRange(boostedPeak, 0.06f, 0.45f);
+
+        // Pure sub-threshold noise floor (< 0.001) should stay silent without runaway hiss gain
+        var floor = new float[320];
+        Array.Fill(floor, 0.0004f);
+        agc.ProcessInPlace(floor);
+        Assert.All(floor, s => Assert.True(MathF.Abs(s) < 0.005f));
     }
 
     [Fact]

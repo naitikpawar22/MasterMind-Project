@@ -67,6 +67,8 @@ public sealed class AppSettings
 
     public string PreferredMicrophoneId { get; set; } = string.Empty;
 
+    public string PreferredSystemAudioDeviceId { get; set; } = string.Empty;
+
     public bool AllowMicrophoneAccess { get; set; } = true;
 
     public bool EnableMicrophoneLevelMonitoring { get; set; } = true;
@@ -93,6 +95,7 @@ public sealed class AppSettings
         EnableScreenCaptureExclusionByDefault = EnableScreenCaptureExclusionByDefault,
         WindowOpacity = ClampOpacity(WindowOpacity),
         PreferredMicrophoneId = PreferredMicrophoneId,
+        PreferredSystemAudioDeviceId = PreferredSystemAudioDeviceId,
         AllowMicrophoneAccess = AllowMicrophoneAccess,
         EnableMicrophoneLevelMonitoring = EnableMicrophoneLevelMonitoring,
         EnableSystemAudioMonitoring = EnableSystemAudioMonitoring,

@@ -175,18 +175,68 @@
                         </Border>
                     </Grid>
 
-                    <TextBlock Text="{Binding SystemAudioDeviceName, StringFormat=Active Output: {0}}"
-                               FontWeight="SemiBold"
-                               FontSize="12.5"
-                               Margin="0,4,0,14"
-                               TextTrimming="CharacterEllipsis" />
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox Grid.Column="0"
+                                  ItemsSource="{Binding SystemAudioDevices}"
+                                  SelectedValuePath="Id"
+                                  DisplayMemberPath="FriendlyName"
+                                  SelectedValue="{Binding SelectedSystemAudioDeviceId, Mode=TwoWay}"
+                                  Height="30"
+                                  Padding="8,3"
+                                  Margin="0,0,6,0"
+                                  ToolTip="Auto monitors Windows Call (Communications) + Playback (Multimedia) + all active headphones/speakers simultaneously" />
+                        <Button Grid.Column="1"
+                                Content="Refresh"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Padding="10,4"
+                                Command="{Binding RefreshSystemAudioCommand}" />
+                    </Grid>
 
+                    <!-- Live System Audio Level + 20-Bar Waveform Indicator -->
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="42" />
                         </Grid.ColumnDefinitions>
-                        <ProgressBar Grid.Column="0"
+                        <Border Grid.Column="0"
+                                Height="30"
+                                Background="{DynamicResource SurfaceSecondaryBrush}"
+                                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                BorderThickness="1"
+                                CornerRadius="5"
+                                Padding="6,2"
+                                Margin="0,0,8,0"
+                                ToolTip="Live Windows system-audio output waveform">
+                            <ItemsControl ItemsSource="{Binding SystemAudioWaveformBars}" VerticalAlignment="Bottom">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Width="4" Height="{Binding}" CornerRadius="1.5" Margin="0,0,2,0" VerticalAlignment="Bottom">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="{DynamicResource AccentPrimaryBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding DataContext.IsSystemAudioMuted, RelativeSource={RelativeSource AncestorType=ItemsControl}}" Value="True">
+                                                            <Setter Property="Background" Value="{DynamicResource TextMutedBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Border>
+                        <ProgressBar Grid.Column="1"
                                      Height="10"
                                      Minimum="0"
                                      Maximum="100"
@@ -206,7 +256,7 @@
                                 </Style>
                             </ProgressBar.Style>
                         </ProgressBar>
-                        <TextBlock Grid.Column="1"
+                        <TextBlock Grid.Column="2"
                                    Text="{Binding SystemAudioLevelPercent, StringFormat={}{0}%}"
                                    FontWeight="SemiBold"
                                    HorizontalAlignment="Right"

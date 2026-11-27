@@ -200,6 +200,20 @@ public sealed class SettingsViewModel : ViewModelBase
     public string ActiveMicrophoneName => _microphoneState.ActiveDeviceName;
 
     // System Audio Loopback Controls
+    public IReadOnlyList<SystemAudioDevice> SystemAudioDevices => _systemAudioState.Devices;
+
+    public string SelectedSystemAudioDeviceId
+    {
+        get => _systemAudioState.SelectedDeviceId;
+        set
+        {
+            if (!string.Equals(_systemAudioState.SelectedDeviceId, value ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+            {
+                _systemAudioService.SelectDevice(value ?? string.Empty);
+            }
+        }
+    }
+
     public bool EnableSystemAudioMonitoring
     {
         get => _systemAudioState.IsListening || _settingsService.CurrentSettings.EnableSystemAudioMonitoring;
@@ -216,6 +230,7 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public bool IsSystemAudioListening => _systemAudioState.IsListening;
     public int SystemAudioLevelPercent => _systemAudioState.OutputLevelPercent;
+    public IReadOnlyList<double> SystemAudioWaveformBars => _systemAudioState.WaveformBars;
     public bool IsSystemAudioMuted => _systemAudioState.IsMuted;
     public bool IsSystemAudioDeviceAvailable => _systemAudioState.IsDeviceAvailable;
     public string SystemAudioMuteButtonText => _systemAudioState.IsMuted ? "Unmute System Audio" : "Mute System Audio";
@@ -455,10 +470,22 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private void ApplySystemAudioState(SystemAudioState sysState)
     {
+        var prev = _systemAudioState;
         _systemAudioState = sysState;
+        if (!ReferenceEquals(prev.Devices, sysState.Devices))
+        {
+            OnPropertyChanged(nameof(SystemAudioDevices));
+        }
+
+        if (!string.Equals(prev.SelectedDeviceId, sysState.SelectedDeviceId, StringComparison.OrdinalIgnoreCase))
+        {
+            OnPropertyChanged(nameof(SelectedSystemAudioDeviceId));
+        }
+
         OnPropertyChanged(nameof(EnableSystemAudioMonitoring));
         OnPropertyChanged(nameof(IsSystemAudioListening));
         OnPropertyChanged(nameof(SystemAudioLevelPercent));
+        OnPropertyChanged(nameof(SystemAudioWaveformBars));
         OnPropertyChanged(nameof(IsSystemAudioMuted));
         OnPropertyChanged(nameof(IsSystemAudioDeviceAvailable));
         OnPropertyChanged(nameof(SystemAudioMuteButtonText));
@@ -559,6 +586,7 @@ public sealed class SettingsViewModel : ViewModelBase
             EnableScreenCaptureExclusionByDefault = EnableCaptureExclusionByDefault,
             WindowOpacity = AppSettings.ClampOpacity(WindowOpacity),
             PreferredMicrophoneId = SelectedMicrophoneId,
+            PreferredSystemAudioDeviceId = SelectedSystemAudioDeviceId,
             AllowMicrophoneAccess = AllowMicrophoneAccess,
             EnableMicrophoneLevelMonitoring = EnableMicrophoneLevelMonitoring,
             EnableSystemAudioMonitoring = EnableSystemAudioMonitoring,
@@ -589,6 +617,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _microphoneService.SetWorkspaceMicrophoneAllowed(defaults.AllowMicrophoneAccess);
         _microphoneService.SetMonitoringEnabled(defaults.EnableMicrophoneLevelMonitoring);
         _microphoneService.SelectDevice(defaults.PreferredMicrophoneId);
+        _systemAudioService.SelectDevice(defaults.PreferredSystemAudioDeviceId);
         if (defaults.EnableSystemAudioMonitoring) _systemAudioService.StartListening();
         else _systemAudioService.StopListening();
         _transcriptionService.SetEnabled(defaults.EnableLiveSpeechTranscription);

@@ -100,22 +100,33 @@ public sealed class ViewModelTests : IDisposable
     private sealed class StubSystemAudioBackend : ISystemAudioBackend
     {
         public event EventHandler<double>? AudioLevelMeasured;
+        public event EventHandler<string>? ActiveEndpointDetected;
         public event EventHandler<Exception?>? CaptureStoppedUnexpectedly;
         public event EventHandler? DevicesTopologyChanged;
 
-        public string? ResolveDefaultRenderDevice(out string friendlyName)
+        public IReadOnlyList<SystemAudioDevice> EnumerateRenderDevices() =>
+            [new SystemAudioDevice("spk-1", "Speakers (Realtek Audio)", IsDefaultMultimedia: true, IsDefaultCommunications: true)];
+
+        public IReadOnlyList<string> ResolveTargetRenderDevices(
+            string selectedOptionId,
+            out string displaySummary,
+            out string? fallbackNotice)
         {
-            friendlyName = "Speakers (Realtek Audio)";
-            return "spk-1";
+            fallbackNotice = null;
+            displaySummary = "Speakers (Realtek Audio)";
+            return ["spk-1"];
         }
 
-        public void StartLoopbackCapture(string deviceId) { }
+        public void StartLoopbackCapture(IReadOnlyList<string> deviceIds, out IReadOnlyList<string> startedDeviceNames) =>
+            startedDeviceNames = ["Speakers (Realtek Audio)"];
+
         public void StopCapture() { }
         public void SetMutedSuppression(bool muted) { }
         public void SetPcmSink(Pcm16kSpanHandler? sink) { }
         public void Dispose()
         {
             _ = AudioLevelMeasured;
+            _ = ActiveEndpointDetected;
             _ = CaptureStoppedUnexpectedly;
             _ = DevicesTopologyChanged;
         }

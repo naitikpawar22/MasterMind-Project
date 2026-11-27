@@ -105,7 +105,7 @@ public sealed class SapiSpeechTranscriptionBackend : ISpeechTranscriptionBackend
         private void OnSpeechRecognized(object? sender, SpeechRecognizedEventArgs e)
         {
             var text = e.Result?.Text?.Trim();
-            if (!string.IsNullOrWhiteSpace(text) && e.Result!.Confidence >= 0.05f)
+            if (!string.IsNullOrWhiteSpace(text) && text.Length >= 2 && e.Result!.Confidence >= 0.02f)
             {
                 _owner.FinalTranscriptReceived?.Invoke(_owner,
                     new SpeechTranscriptEventArgs(_source, Volatile.Read(ref _deviceName), text, e.Result.Confidence));
@@ -322,6 +322,8 @@ public sealed class SpeechTranscriptionService : ISpeechTranscriptionService
     private string? _errorMessage;
     private bool _micTranscribing;
     private bool _systemTranscribing;
+    private (bool Active, string Device) _lastMicPipelineKey;
+    private (bool Active, string Device) _lastSysPipelineKey;
     private TranscriptionState _state = new();
     private bool _disposed;
 
@@ -451,9 +453,27 @@ public sealed class SpeechTranscriptionService : ISpeechTranscriptionService
         _backend.PushPcm16k(source, pcm);
     }
 
-    private void OnMicrophoneStateChanged(object? sender, MicrophoneState _) => SyncActivePipelines();
+    private void OnMicrophoneStateChanged(object? sender, MicrophoneState state)
+    {
+        var nextKey = (state.IsMonitoring && state.IsDeviceAvailable, state.ActiveDeviceName);
+        if (nextKey == _lastMicPipelineKey)
+        {
+            return;
+        }
 
-    private void OnSystemAudioStateChanged(object? sender, SystemAudioState _) => SyncActivePipelines();
+        SyncActivePipelines();
+    }
+
+    private void OnSystemAudioStateChanged(object? sender, SystemAudioState state)
+    {
+        var nextKey = (state.IsListening && state.IsDeviceAvailable, state.ActiveDeviceName);
+        if (nextKey == _lastSysPipelineKey)
+        {
+            return;
+        }
+
+        SyncActivePipelines();
+    }
 
     private void SyncActivePipelines()
     {
@@ -462,6 +482,9 @@ public sealed class SpeechTranscriptionService : ISpeechTranscriptionService
 
         var wantMic = _engineAvailable && _isEnabled && micState.IsMonitoring && micState.IsDeviceAvailable;
         var wantSys = _engineAvailable && _isEnabled && sysState.IsListening && sysState.IsDeviceAvailable;
+
+        _lastMicPipelineKey = (micState.IsMonitoring && micState.IsDeviceAvailable, micState.ActiveDeviceName);
+        _lastSysPipelineKey = (sysState.IsListening && sysState.IsDeviceAvailable, sysState.ActiveDeviceName);
 
         if (wantMic)
         {
