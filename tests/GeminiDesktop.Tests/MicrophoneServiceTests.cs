@@ -72,6 +72,7 @@ public sealed class MicrophoneServiceTests : IDisposable
         public void SetMutedSuppression(bool muted) { }
 
         public void SetPcmSink(Helpers.Pcm16kSpanHandler? sink) { }
+        public void SetMonitorFloatSink(Helpers.Float16kSpanHandler? sink) { }
 
         public void EmitLevel(double level) => AudioLevelMeasured?.Invoke(this, level);
         public void EmitDisconnect(Exception ex) => CaptureStoppedUnexpectedly?.Invoke(this, ex);

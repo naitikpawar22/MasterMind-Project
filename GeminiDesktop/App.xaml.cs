@@ -41,11 +41,13 @@ public partial class App : Application
         var micService = _serviceProvider.GetRequiredService<IMicrophoneService>();
         var sysAudioService = _serviceProvider.GetRequiredService<ISystemAudioService>();
         var transcriptionService = _serviceProvider.GetRequiredService<ISpeechTranscriptionService>();
+        var mixedAudioService = _serviceProvider.GetRequiredService<IMixedAudioRouterService>();
         Dispatcher.BeginInvoke(() =>
         {
             micService.Initialize();
             sysAudioService.Initialize();
             transcriptionService.Initialize();
+            mixedAudioService.Initialize();
         });
     }
 
@@ -65,6 +67,8 @@ public partial class App : Application
         services.AddSingleton<ISystemAudioService, SystemAudioService>();
         services.AddSingleton<ISpeechTranscriptionBackend, SapiSpeechTranscriptionBackend>();
         services.AddSingleton<ISpeechTranscriptionService, SpeechTranscriptionService>();
+        services.AddSingleton<IMixedAudioRouterBackend, WasapiMixedAudioRouterBackend>();
+        services.AddSingleton<IMixedAudioRouterService, MixedAudioRouterService>();
         services.AddSingleton<IWebViewService, WebViewService>();
         services.AddSingleton<IGeminiBrowserService, GeminiBrowserService>();
 

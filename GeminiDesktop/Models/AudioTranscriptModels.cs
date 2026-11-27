@@ -99,3 +99,50 @@ public sealed class TranscriptionState
 
     public string? ErrorMessage { get; init; }
 }
+
+/// <summary>
+/// Represents a supported signed virtual audio playback device (e.g., VB-Audio Virtual Cable input)
+/// capable of feeding mixed audio into a paired Windows virtual capture microphone for Gemini.
+/// </summary>
+public sealed record VirtualAudioOutputDevice(
+    string Id,
+    string FriendlyName,
+    string PairedCaptureHint);
+
+/// <summary>
+/// Live state of synchronized Microphone + System Audio mixing into a signed Windows virtual microphone driver.
+/// </summary>
+public sealed class MixedAudioState
+{
+    public bool IsEnabled { get; init; }
+
+    public bool IsStreaming { get; init; }
+
+    public bool IsDriverInstalled { get; init; }
+
+    public IReadOnlyList<VirtualAudioOutputDevice> AvailableOutputs { get; init; } = [];
+
+    public string SelectedOutputDeviceId { get; init; } = string.Empty;
+
+    public string ActiveOutputDeviceName { get; init; } = "No virtual audio driver detected";
+
+    public string PairedCaptureMicHint { get; init; } = "CABLE Output (VB-Audio Virtual Cable)";
+
+    public int MicrophoneVolumePercent { get; init; } = 100;
+
+    public int SystemAudioVolumePercent { get; init; } = 100;
+
+    public bool IsMicrophoneMixMuted { get; init; }
+
+    public bool IsSystemAudioMixMuted { get; init; }
+
+    public double MixedOutputLevel { get; init; }
+
+    public int MixedOutputLevelPercent => (int)Math.Round(Math.Clamp(MixedOutputLevel, 0.0, 1.0) * 100.0);
+
+    public string StatusText { get; init; } = "Mixed Gemini feed off";
+
+    public string? DependencyMessage { get; init; }
+
+    public string? ErrorMessage { get; init; }
+}

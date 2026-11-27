@@ -591,7 +591,11 @@ public sealed class SettingsViewModel : ViewModelBase
             EnableMicrophoneLevelMonitoring = EnableMicrophoneLevelMonitoring,
             EnableSystemAudioMonitoring = EnableSystemAudioMonitoring,
             EnableLiveSpeechTranscription = EnableLiveSpeechTranscription,
-            IsAudioPanelVisible = _settingsService.CurrentSettings.IsAudioPanelVisible
+            IsAudioPanelVisible = _settingsService.CurrentSettings.IsAudioPanelVisible,
+            EnableGeminiMixedAudioRouting = _settingsService.CurrentSettings.EnableGeminiMixedAudioRouting,
+            PreferredMixedOutputDeviceId = _settingsService.CurrentSettings.PreferredMixedOutputDeviceId,
+            MixedMicrophoneVolumePercent = _settingsService.CurrentSettings.MixedMicrophoneVolumePercent,
+            MixedSystemAudioVolumePercent = _settingsService.CurrentSettings.MixedSystemAudioVolumePercent
         };
 
         _settingsService.SaveSettings(updated);

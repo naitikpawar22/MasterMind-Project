@@ -79,6 +79,14 @@ public sealed class AppSettings
 
     public bool IsAudioPanelVisible { get; set; } = true;
 
+    public bool EnableGeminiMixedAudioRouting { get; set; } = false;
+
+    public string PreferredMixedOutputDeviceId { get; set; } = string.Empty;
+
+    public int MixedMicrophoneVolumePercent { get; set; } = 100;
+
+    public int MixedSystemAudioVolumePercent { get; set; } = 100;
+
     public AppSettings Clone() => new()
     {
         LaunchBehavior = LaunchBehavior,
@@ -100,7 +108,11 @@ public sealed class AppSettings
         EnableMicrophoneLevelMonitoring = EnableMicrophoneLevelMonitoring,
         EnableSystemAudioMonitoring = EnableSystemAudioMonitoring,
         EnableLiveSpeechTranscription = EnableLiveSpeechTranscription,
-        IsAudioPanelVisible = IsAudioPanelVisible
+        IsAudioPanelVisible = IsAudioPanelVisible,
+        EnableGeminiMixedAudioRouting = EnableGeminiMixedAudioRouting,
+        PreferredMixedOutputDeviceId = PreferredMixedOutputDeviceId,
+        MixedMicrophoneVolumePercent = Math.Clamp(MixedMicrophoneVolumePercent, 0, 200),
+        MixedSystemAudioVolumePercent = Math.Clamp(MixedSystemAudioVolumePercent, 0, 200)
     };
 
     public static double ClampOpacity(double opacity) =>

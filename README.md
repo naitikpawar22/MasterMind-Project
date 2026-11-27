@@ -83,6 +83,7 @@ MasterMind/
 │   │   ├── GeminiBrowserService.cs
 │   │   ├── LoggingService.cs
 │   │   ├── MicrophoneService.cs
+│   │   ├── MixedAudioRouterService.cs
 │   │   ├── PrivacyService.cs
 │   │   ├── SettingsService.cs
 │   │   ├── SpeechTranscriptionService.cs

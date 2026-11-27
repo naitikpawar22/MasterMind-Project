@@ -27,6 +27,7 @@ public interface IMicrophoneBackend : IDisposable
     void StopCapture();
     void SetMutedSuppression(bool muted);
     void SetPcmSink(Pcm16kSpanHandler? sink);
+    void SetMonitorFloatSink(Float16kSpanHandler? sink);
 }
 
 /// <summary>
@@ -94,12 +95,17 @@ public sealed class WasapiMicrophoneBackend : IMicrophoneBackend
         var list = new List<MicrophoneDevice>();
         var defaultId = ResolveDefaultCaptureDeviceId();
 
-        // Strictly DataFlow.Capture (physical microphones/input devices only).
+        // Strictly DataFlow.Capture physical microphones (exclude virtual cable loopback capture endpoints to prevent self-echo).
         var endpoints = _enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
         foreach (var device in endpoints)
         {
             using (device)
             {
+                if (VirtualAudioDriverCatalog.IsVirtualLoopbackCaptureDevice(device.FriendlyName))
+                {
+                    continue;
+                }
+
                 var isDefault = string.Equals(device.ID, defaultId, StringComparison.OrdinalIgnoreCase);
                 list.Add(new MicrophoneDevice(device.ID, device.FriendlyName, isDefault, IsSystemDefaultOption: false));
             }
@@ -115,7 +121,10 @@ public sealed class WasapiMicrophoneBackend : IMicrophoneBackend
             if (_enumerator.HasDefaultAudioEndpoint(DataFlow.Capture, Role.Communications))
             {
                 using var dev = _enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
-                return dev.ID;
+                if (!VirtualAudioDriverCatalog.IsVirtualLoopbackCaptureDevice(dev.FriendlyName))
+                {
+                    return dev.ID;
+                }
             }
         }
         catch
@@ -128,12 +137,33 @@ public sealed class WasapiMicrophoneBackend : IMicrophoneBackend
             if (_enumerator.HasDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia))
             {
                 using var dev = _enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
-                return dev.ID;
+                if (!VirtualAudioDriverCatalog.IsVirtualLoopbackCaptureDevice(dev.FriendlyName))
+                {
+                    return dev.ID;
+                }
             }
         }
         catch
         {
-            // No active default capture device.
+            // Fall through to first physical capture endpoint.
+        }
+
+        try
+        {
+            foreach (var dev in _enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
+            {
+                using (dev)
+                {
+                    if (!VirtualAudioDriverCatalog.IsVirtualLoopbackCaptureDevice(dev.FriendlyName))
+                    {
+                        return dev.ID;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // No active physical capture devices.
         }
 
         return null;
@@ -223,6 +253,8 @@ public sealed class WasapiMicrophoneBackend : IMicrophoneBackend
 
     public void SetPcmSink(Pcm16kSpanHandler? sink) => _session.SetPcmSink(sink);
 
+    public void SetMonitorFloatSink(Float16kSpanHandler? sink) => _session.SetFloatSink(sink);
+
     private void OnEndpointVolumeNotification(AudioVolumeNotificationData data) =>
         ExternalMuteChanged?.Invoke(this, data.Muted);
 
@@ -301,6 +333,7 @@ public interface IMicrophoneService : IDisposable
     void SetMonitoringEnabled(bool enabled);
     void SetWorkspaceMicrophoneAllowed(bool allowed);
     void SetPcmSink(Pcm16kSpanHandler? sink);
+    void SetMonitorFloatSink(Float16kSpanHandler? sink);
     void OpenWindowsMicrophonePrivacySettings();
 }
 
@@ -356,6 +389,8 @@ public sealed class MicrophoneService : IMicrophoneService
     public void StopListening() => SetMonitoringEnabled(false);
 
     public void SetPcmSink(Pcm16kSpanHandler? sink) => _backend.SetPcmSink(sink);
+
+    public void SetMonitorFloatSink(Float16kSpanHandler? sink) => _backend.SetMonitorFloatSink(sink);
 
     public void RefreshDevices(string? notificationStatus = null)
     {

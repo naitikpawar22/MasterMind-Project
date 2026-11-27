@@ -17,6 +17,7 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
     private sealed class FakeMicBackend : IMicrophoneBackend
     {
         public Pcm16kSpanHandler? PcmSink { get; private set; }
+        public Float16kSpanHandler? MonitorFloatSink { get; private set; }
         public bool IsMutedSuppressed { get; private set; }
         public string? StartedId { get; private set; }
 
@@ -35,8 +36,10 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
         public void StopCapture() => StartedId = null;
         public void SetMutedSuppression(bool muted) => IsMutedSuppressed = muted;
         public void SetPcmSink(Pcm16kSpanHandler? sink) => PcmSink = sink;
+        public void SetMonitorFloatSink(Float16kSpanHandler? sink) => MonitorFloatSink = sink;
         public void EmitLevel(double level) => AudioLevelMeasured?.Invoke(this, level);
         public void PushPcm(byte[] pcm) { if (!IsMutedSuppressed) PcmSink?.Invoke(pcm); }
+        public void PushFloat(float[] samples) { if (!IsMutedSuppressed) MonitorFloatSink?.Invoke(samples); }
         public void Dispose()
         {
             _ = CaptureStoppedUnexpectedly;
@@ -57,6 +60,7 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
         public bool IsMutedSuppressed { get; private set; }
         public bool ThrowUnauthorizedOnStart { get; set; }
         public Pcm16kSpanHandler? PcmSink { get; private set; }
+        public Float16kSpanHandler? MonitorFloatSink { get; private set; }
 
         public event EventHandler<double>? AudioLevelMeasured;
         public event EventHandler<string>? ActiveEndpointDetected;
@@ -130,12 +134,45 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
         public void StopCapture() => StartedIds = [];
         public void SetMutedSuppression(bool muted) => IsMutedSuppressed = muted;
         public void SetPcmSink(Pcm16kSpanHandler? sink) => PcmSink = sink;
+        public void SetMonitorFloatSink(Float16kSpanHandler? sink) => MonitorFloatSink = sink;
         public void EmitLevel(double level) => AudioLevelMeasured?.Invoke(this, level);
         public void EmitActiveEndpoint(string name) => ActiveEndpointDetected?.Invoke(this, name);
         public void EmitDisconnect(Exception ex) => CaptureStoppedUnexpectedly?.Invoke(this, ex);
         public void EmitTopologyChange() => DevicesTopologyChanged?.Invoke(this, EventArgs.Empty);
         public void PushPcm(byte[] pcm) { if (!IsMutedSuppressed) PcmSink?.Invoke(pcm); }
+        public void PushFloat(float[] samples) { if (!IsMutedSuppressed) MonitorFloatSink?.Invoke(samples); }
         public void Dispose() { }
+    }
+
+    private sealed class FakeMixedAudioRouterBackend : IMixedAudioRouterBackend
+    {
+        public List<VirtualAudioOutputDevice> VirtualOutputs { get; } = [];
+        public IWaveProvider? ActiveProvider { get; private set; }
+        public string? RoutedDeviceId { get; private set; }
+
+        public event EventHandler<Exception?>? RoutingStoppedUnexpectedly;
+        public event EventHandler? DevicesTopologyChanged;
+
+        public IReadOnlyList<VirtualAudioOutputDevice> EnumerateVirtualOutputs() => [.. VirtualOutputs];
+        public WaveFormat ResolveOutputWaveFormat(string deviceId) => WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
+
+        public void StartRouting(string deviceId, IWaveProvider mixedWaveProvider, out string friendlyName, out string pairedCaptureHint)
+        {
+            var dev = VirtualOutputs.First(d => d.Id == deviceId);
+            RoutedDeviceId = deviceId;
+            ActiveProvider = mixedWaveProvider;
+            friendlyName = dev.FriendlyName;
+            pairedCaptureHint = dev.PairedCaptureHint;
+        }
+
+        public void StopRouting()
+        {
+            RoutedDeviceId = null;
+            ActiveProvider = null;
+        }
+
+        public void EmitTopologyChange() => DevicesTopologyChanged?.Invoke(this, EventArgs.Empty);
+        public void Dispose() => _ = RoutingStoppedUnexpectedly;
     }
 
     private sealed class StubSpeechBackend : ISpeechTranscriptionBackend
@@ -469,6 +506,144 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
         Assert.True(recognizedBoth, $"Expected finalized text from both streams, got count={finals.Count}: {string.Join(" | ", finals.Select(f => $"{f.Source}:{f.Text}"))}");
         Assert.Contains(finals, f => f.Source == AudioSourceKind.Microphone && !string.IsNullOrWhiteSpace(f.Text));
         Assert.Contains(finals, f => f.Source == AudioSourceKind.SystemAudio && !string.IsNullOrWhiteSpace(f.Text));
+    }
+
+    [Fact]
+    public void VirtualAudioDriverCatalog_PreventsSpeakerAndCaptureFeedbackLoops()
+    {
+        // Only isolated virtual cable playback endpoints may receive mixed output
+        Assert.True(VirtualAudioDriverCatalog.IsVirtualAudioRenderSink("CABLE Input (VB-Audio Virtual Cable)"));
+        Assert.True(VirtualAudioDriverCatalog.IsVirtualAudioRenderSink("VoiceMeeter Input (VB-Audio VoiceMeeter VAIO)"));
+        Assert.False(VirtualAudioDriverCatalog.IsVirtualAudioRenderSink("Speakers (Realtek(R) Audio)"));
+        Assert.False(VirtualAudioDriverCatalog.IsVirtualAudioRenderSink("Headphones (Buds Pro3)"));
+
+        // Paired virtual capture microphones are excluded from auto/default physical microphone capture
+        Assert.True(VirtualAudioDriverCatalog.IsVirtualLoopbackCaptureDevice("CABLE Output (VB-Audio Virtual Cable)"));
+        Assert.True(VirtualAudioDriverCatalog.IsVirtualLoopbackCaptureDevice("VoiceMeeter Output (VB-Audio VoiceMeeter VAIO)"));
+        Assert.True(VirtualAudioDriverCatalog.IsVirtualLoopbackCaptureDevice("Stereo Mix (Realtek(R) Audio)"));
+        Assert.False(VirtualAudioDriverCatalog.IsVirtualLoopbackCaptureDevice("Microphone (Realtek(R) Audio)"));
+
+        Assert.Equal("CABLE Output (VB-Audio Virtual Cable)", VirtualAudioDriverCatalog.InferPairedCaptureMicHint("CABLE Input (VB-Audio Virtual Cable)"));
+    }
+
+    [Fact]
+    public void SynchronizedMixedAudioWaveProvider_MixesBothStreamsWithIndependentVolumesAndNoClipping()
+    {
+        double latestLevel = 0;
+        var provider = new SynchronizedMixedAudioWaveProvider(
+            WaveFormat.CreateIeeeFloatWaveFormat(48000, 2),
+            lvl => latestLevel = lvl);
+
+        // Push 20ms @ 16kHz (320 samples) from Mic (440 Hz @ 0.80) and System (880 Hz @ 0.80) -> sum raw 1.60 soft-limited safely!
+        var micFrames = new float[320];
+        var sysFrames = new float[320];
+        for (var i = 0; i < 320; i++)
+        {
+            micFrames[i] = 0.80f * MathF.Sin(2f * MathF.PI * 440f * i / 16000f);
+            sysFrames[i] = 0.80f * MathF.Sin(2f * MathF.PI * 880f * i / 16000f);
+        }
+
+        provider.PushMicrophoneFloat16k(micFrames);
+        provider.PushSystemAudioFloat16k(sysFrames);
+
+        // Read 20ms @ 48kHz 2ch Float32 = 960 frames * 8 bytes = 7680 bytes
+        var outBytes = new byte[7680];
+        var read = provider.Read(outBytes, 0, outBytes.Length);
+        Assert.Equal(outBytes.Length, read);
+
+        float maxOutSample = 0f;
+        for (var i = 0; i + 3 < read; i += 4)
+        {
+            var val = MathF.Abs(BinaryPrimitives.ReadSingleLittleEndian(outBytes.AsSpan(i, 4)));
+            if (val > maxOutSample) maxOutSample = val;
+        }
+
+        Assert.InRange(maxOutSample, 0.85f, 0.985f);
+        Assert.True(latestLevel > 0.5);
+
+        // Muting Mic mix passes ONLY System Audio cleanly
+        provider.SetMicrophoneMix(100, muted: true);
+        provider.SetSystemAudioMix(50, muted: false);
+        provider.PushMicrophoneFloat16k(micFrames);
+        provider.PushSystemAudioFloat16k(sysFrames);
+        Array.Clear(outBytes, 0, outBytes.Length);
+        read = provider.Read(outBytes, 0, outBytes.Length);
+        Assert.Equal(outBytes.Length, read);
+        float maxMutedMicSample = 0f;
+        for (var i = 0; i + 3 < read; i += 4)
+        {
+            var val = MathF.Abs(BinaryPrimitives.ReadSingleLittleEndian(outBytes.AsSpan(i, 4)));
+            if (val > maxMutedMicSample) maxMutedMicSample = val;
+        }
+
+        Assert.InRange(maxMutedMicSample, 0.35f, 0.45f);
+    }
+
+    [Fact]
+    public void MixedAudioRouterService_HandlesMissingDriverHonestlyAndRoutesWhenVirtualCableInstalled()
+    {
+        using var log = new LoggingService(_tempRoot);
+        var settings = new SettingsService(log, _tempRoot, allowRegistryStartupChanges: false);
+        var micBackend = new FakeMicBackend();
+        var sysBackend = new FakeSystemAudioBackend();
+        var mixedBackend = new FakeMixedAudioRouterBackend();
+        var txBackend = new StubSpeechBackend();
+
+        using var micService = new MicrophoneService(micBackend, settings, log);
+        using var sysService = new SystemAudioService(sysBackend, settings, log);
+        using var txService = new SpeechTranscriptionService(txBackend, micService, sysService, settings, log);
+        using var mixedService = new MixedAudioRouterService(mixedBackend, micService, sysService, settings, log);
+
+        micService.Initialize();
+        sysService.Initialize();
+        txService.Initialize();
+        mixedService.Initialize();
+
+        // Step 1: When no virtual audio cable is installed, honestly report dependency and refuse fake streaming
+        Assert.False(mixedService.CurrentState.IsDriverInstalled);
+        Assert.False(mixedService.CurrentState.IsStreaming);
+        Assert.False(string.IsNullOrWhiteSpace(mixedService.CurrentState.DependencyMessage));
+
+        mixedService.SetEnabled(true);
+        Assert.False(mixedService.CurrentState.IsStreaming);
+        Assert.Contains("VB-Audio Virtual Cable", mixedService.CurrentState.ErrorMessage);
+
+        // Step 2: Simulate signed VB-Audio Virtual Cable installed -> starts routing cleanly without breaking transcription
+        using var routingStartedGate = new ManualResetEventSlim(false);
+        mixedService.StateChanged += (_, s) =>
+        {
+            if (s.IsStreaming)
+            {
+                routingStartedGate.Set();
+            }
+        };
+        mixedBackend.VirtualOutputs.Add(new VirtualAudioOutputDevice(
+            "vbcable-in",
+            "CABLE Input (VB-Audio Virtual Cable)",
+            "CABLE Output (VB-Audio Virtual Cable)"));
+        mixedBackend.EmitTopologyChange();
+        Assert.True(routingStartedGate.Wait(TimeSpan.FromSeconds(3)), "Expected debounced topology update to start virtual routing.");
+
+        Assert.True(mixedService.CurrentState.IsDriverInstalled);
+        Assert.True(mixedService.CurrentState.IsStreaming);
+        Assert.Equal("vbcable-in", mixedBackend.RoutedDeviceId);
+        Assert.NotNull(mixedBackend.ActiveProvider);
+
+        // Step 3: Push simultaneous Mic + System float audio and verify mixed wave provider delivers combined audio
+        var micFloat = Enumerable.Repeat(0.25f, 320).ToArray();
+        var sysFloat = Enumerable.Repeat(0.25f, 320).ToArray();
+        micBackend.PushFloat(micFloat);
+        sysBackend.PushFloat(sysFloat);
+
+        var buf = new byte[7680];
+        var read = mixedBackend.ActiveProvider!.Read(buf);
+        Assert.Equal(7680, read);
+        var firstMixedSample = BinaryPrimitives.ReadSingleLittleEndian(buf.AsSpan(400, 4));
+        Assert.InRange(firstMixedSample, 0.45f, 0.55f);
+
+        // Right-side transcription continues unaffected concurrently
+        Assert.Contains(AudioSourceKind.Microphone, txBackend.RunningSources);
+        Assert.Contains(AudioSourceKind.SystemAudio, txBackend.RunningSources);
     }
 
     public void Dispose()

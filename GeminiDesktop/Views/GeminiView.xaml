@@ -238,6 +238,72 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- Mixed Audio -> Gemini Indicator Pill -->
+                    <Button Command="{Binding ToggleMixedRoutingCommand}"
+                            ToolTip="{Binding MixedToolbarTooltip}"
+                            Margin="0,0,6,0">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Height="30"
+                                        CornerRadius="6"
+                                        BorderThickness="1"
+                                        Padding="8,0">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{DynamicResource SurfaceBackgroundBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtleBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsMixedAudioStreaming}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource StatusSuccessBgBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource StatusSuccessBorderBrush}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsVirtualDriverInstalled}" Value="False">
+                                                    <Setter Property="Background" Value="{DynamicResource StatusWarningBgBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource StatusWarningBorderBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Ellipse Width="7" Height="7" Margin="0,0,5,0">
+                                            <Ellipse.Style>
+                                                <Style TargetType="Ellipse">
+                                                    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsMixedAudioStreaming}" Value="True">
+                                                            <Setter Property="Fill" Value="{DynamicResource StatusSuccessFgBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsVirtualDriverInstalled}" Value="False">
+                                                            <Setter Property="Fill" Value="{DynamicResource StatusWarningFgBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Ellipse.Style>
+                                        </Ellipse>
+                                        <TextBlock Text="{Binding MixedToolbarBadgeText}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsMixedAudioStreaming}" Value="True">
+                                                            <Setter Property="Foreground" Value="{DynamicResource StatusSuccessFgBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsVirtualDriverInstalled}" Value="False">
+                                                            <Setter Property="Foreground" Value="{DynamicResource StatusWarningFgBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
                     <!-- Dual Audio & Live Transcript Drawer Toggle -->
                     <Button Command="{Binding ToggleAudioPanelCommand}"
                             ToolTip="{Binding AudioPanelToggleTooltip}"
@@ -474,6 +540,7 @@
                         BorderThickness="1,0,0,0">
                     <Grid Margin="12">
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -819,8 +886,113 @@
                             </StackPanel>
                         </Border>
 
+                        <!-- Collapsible Mixed Audio -> Gemini Virtual Mic Strip -->
+                        <Border Grid.Row="3" Style="{StaticResource CompactCardStyle}" Padding="10,7" Margin="0,0,0,8">
+                            <Expander IsExpanded="False">
+                                <Expander.Header>
+                                    <Grid HorizontalAlignment="Stretch">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <CheckBox Grid.Column="0"
+                                                  Style="{StaticResource ModernToggleSwitchStyle}"
+                                                  IsChecked="{Binding IsMixedRoutingEnabled, Mode=TwoWay}"
+                                                  Content="Mix → Gemini Mic"
+                                                  FontSize="11.5"
+                                                  FontWeight="SemiBold"
+                                                  VerticalAlignment="Center"
+                                                  Margin="0,0,6,0" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding MixedOutputLevelPercent, StringFormat=Mix {0}%}"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource TextMutedBrush}"
+                                                   VerticalAlignment="Center"
+                                                   HorizontalAlignment="Right"
+                                                   Margin="0,0,6,0" />
+                                    </Grid>
+                                </Expander.Header>
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock Text="{Binding MixedStatusText}"
+                                               FontSize="11"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,6" />
+
+                                    <Border Style="{StaticResource WarningBannerStyle}"
+                                            Padding="8,5"
+                                            Margin="0,0,0,6"
+                                            Visibility="{Binding MixedDependencyMessage, Converter={StaticResource StringToVis}}">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding MixedDependencyMessage}"
+                                                       FontSize="11"
+                                                       Foreground="{DynamicResource StatusWarningFgBrush}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,0,0,5" />
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button Content="Get VB-Audio Cable"
+                                                        Style="{StaticResource PrimaryButtonStyle}"
+                                                        Command="{Binding OpenVirtualAudioDriverPageCommand}"
+                                                        Padding="8,3"
+                                                        FontSize="11"
+                                                        Margin="0,0,4,0" />
+                                                <Button Content="↻"
+                                                        ToolTip="Refresh Virtual Drivers"
+                                                        Style="{StaticResource SecondaryButtonStyle}"
+                                                        Command="{Binding RefreshMixedDriversCommand}"
+                                                        Padding="8,3"
+                                                        FontSize="11" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <ComboBox Grid.Column="0"
+                                                  ItemsSource="{Binding MixedVirtualOutputs}"
+                                                  SelectedValuePath="Id"
+                                                  DisplayMemberPath="FriendlyName"
+                                                  SelectedValue="{Binding SelectedMixedOutputDeviceId, Mode=TwoWay}"
+                                                  IsEnabled="{Binding IsVirtualDriverInstalled}"
+                                                  FontSize="11"
+                                                  Height="25"
+                                                  Padding="6,2"
+                                                  Margin="0,0,4,0" />
+                                        <Button Grid.Column="1"
+                                                Content="↻"
+                                                ToolTip="Refresh Virtual Drivers"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                Command="{Binding RefreshMixedDriversCommand}"
+                                                Padding="8,2"
+                                                FontSize="11.5" />
+                                    </Grid>
+
+                                    <Grid Margin="0,0,0,4">
+                                        <TextBlock Text="Mic Mix Volume" FontSize="11" />
+                                        <TextBlock Text="{Binding MixedMicrophoneVolumePercent, StringFormat={}{0}%}" FontSize="11" HorizontalAlignment="Right" />
+                                    </Grid>
+                                    <Slider Minimum="0" Maximum="200" Value="{Binding MixedMicrophoneVolumePercent, Mode=TwoWay}" Margin="0,0,0,6" />
+
+                                    <Grid Margin="0,0,0,4">
+                                        <TextBlock Text="System Audio Mix Volume" FontSize="11" />
+                                        <TextBlock Text="{Binding MixedSystemAudioVolumePercent, StringFormat={}{0}%}" FontSize="11" HorizontalAlignment="Right" />
+                                    </Grid>
+                                    <Slider Minimum="0" Maximum="200" Value="{Binding MixedSystemAudioVolumePercent, Mode=TwoWay}" Margin="0,0,0,6" />
+
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="{Binding MixedMicMuteButtonText}" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding ToggleMixedMicMuteCommand}" Padding="7,2" FontSize="10.5" Margin="0,0,4,0" />
+                                        <Button Content="{Binding MixedSysMuteButtonText}" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding ToggleMixedSysMuteCommand}" Padding="7,2" FontSize="10.5" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Expander>
+                        </Border>
+
                         <!-- Real-Time Speech-to-Text Transcript Feed -->
-                        <Border Grid.Row="3" Style="{StaticResource CompactCardStyle}" Padding="12">
+                        <Border Grid.Row="4" Style="{StaticResource CompactCardStyle}" Padding="12">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />

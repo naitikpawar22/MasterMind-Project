@@ -30,6 +30,7 @@ public interface ISystemAudioBackend : IDisposable
     void StopCapture();
     void SetMutedSuppression(bool muted);
     void SetPcmSink(Pcm16kSpanHandler? sink);
+    void SetMonitorFloatSink(Float16kSpanHandler? sink);
 }
 
 /// <summary>
@@ -72,6 +73,7 @@ public sealed class WasapiSystemAudioBackend : ISystemAudioBackend
     private readonly AdaptiveSpeechGainProcessor _speechGain = new();
 
     private Pcm16kSpanHandler? _pcmSink;
+    private Float16kSpanHandler? _monitorFloatSink;
     private string? _activeSpeechSlotId;
     private string? _lastReportedEndpointName;
     private float[] _gainScratchBuffer = new float[2048];
@@ -121,6 +123,12 @@ public sealed class WasapiSystemAudioBackend : ISystemAudioBackend
             {
                 using (device)
                 {
+                    // Never capture virtual cable outputs (e.g. CABLE Input) to prevent feedback loops with Mixed Audio Router.
+                    if (VirtualAudioDriverCatalog.IsVirtualAudioRenderSink(device.FriendlyName))
+                    {
+                        continue;
+                    }
+
                     var id = device.ID;
                     var isMult = string.Equals(id, primaryMultimediaId, StringComparison.OrdinalIgnoreCase);
                     var isComm = string.Equals(id, defaultCommId, StringComparison.OrdinalIgnoreCase);
@@ -347,6 +355,8 @@ public sealed class WasapiSystemAudioBackend : ISystemAudioBackend
 
     public void SetPcmSink(Pcm16kSpanHandler? sink) => Volatile.Write(ref _pcmSink, sink);
 
+    public void SetMonitorFloatSink(Float16kSpanHandler? sink) => Volatile.Write(ref _monitorFloatSink, sink);
+
     private void OnSlotLevel(CaptureSlot? slot, double level)
     {
         if (slot is null || _disposed)
@@ -379,7 +389,8 @@ public sealed class WasapiSystemAudioBackend : ISystemAudioBackend
         }
 
         var sink = Volatile.Read(ref _pcmSink);
-        if (sink is null)
+        var monitorSink = Volatile.Read(ref _monitorFloatSink);
+        if (sink is null && monitorSink is null)
         {
             return;
         }
@@ -449,19 +460,27 @@ public sealed class WasapiSystemAudioBackend : ISystemAudioBackend
                 _lastReportedEndpointName = activeSlot.FriendlyName;
             }
 
-            if (_gainScratchBuffer.Length < samples.Length)
+            if (monitorSink is not null)
             {
-                _gainScratchBuffer = new float[samples.Length];
+                monitorSink(samples);
             }
 
-            samples.CopyTo(_gainScratchBuffer);
-            var processedSpan = _gainScratchBuffer.AsSpan(0, samples.Length);
-            _speechGain.ProcessInPlace(processedSpan);
-
-            var byteCount = AudioProcessingHelper.EncodeFloatToPcm16(processedSpan, ref _pcmScratchBuffer);
-            if (byteCount > 0)
+            if (sink is not null)
             {
-                sink(_pcmScratchBuffer.AsSpan(0, byteCount));
+                if (_gainScratchBuffer.Length < samples.Length)
+                {
+                    _gainScratchBuffer = new float[samples.Length];
+                }
+
+                samples.CopyTo(_gainScratchBuffer);
+                var processedSpan = _gainScratchBuffer.AsSpan(0, samples.Length);
+                _speechGain.ProcessInPlace(processedSpan);
+
+                var byteCount = AudioProcessingHelper.EncodeFloatToPcm16(processedSpan, ref _pcmScratchBuffer);
+                if (byteCount > 0)
+                {
+                    sink(_pcmScratchBuffer.AsSpan(0, byteCount));
+                }
             }
 
             if (changedName && hasVoiceEnergy)
@@ -672,6 +691,7 @@ public interface ISystemAudioService : IDisposable
     void SetMuted(bool muted);
     void ToggleMute();
     void SetPcmSink(Pcm16kSpanHandler? sink);
+    void SetMonitorFloatSink(Float16kSpanHandler? sink);
     void OpenWindowsSoundSettings();
 }
 
@@ -969,6 +989,8 @@ public sealed class SystemAudioService : ISystemAudioService
     public void ToggleMute() => SetMuted(!_state.IsMuted);
 
     public void SetPcmSink(Pcm16kSpanHandler? sink) => _backend.SetPcmSink(sink);
+
+    public void SetMonitorFloatSink(Float16kSpanHandler? sink) => _backend.SetMonitorFloatSink(sink);
 
     public void OpenWindowsSoundSettings()
     {

@@ -834,3 +834,404 @@ public sealed class WasapiStreamCaptureSession : IDisposable
         Stop();
     }
 }
+
+/// <summary>
+/// Thread-safe bounded ring buffer for 16 kHz mono normalized float frames with automatic latency cap
+/// to prevent synchronization drift between live microphone and system audio capture streams.
+/// </summary>
+public sealed class FloatSampleRingBuffer
+{
+    private readonly float[] _buffer;
+    private readonly object _lock = new();
+    private readonly int _trimTargetSamples;
+
+    private int _readPos;
+    private int _writePos;
+    private int _count;
+
+    public FloatSampleRingBuffer(int capacitySamples = 3200, int trimTargetSamples = 640)
+    {
+        _buffer = new float[Math.Max(640, capacitySamples)];
+        _trimTargetSamples = Math.Clamp(trimTargetSamples, 160, _buffer.Length / 2);
+    }
+
+    public int BufferedSamples
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _count;
+            }
+        }
+    }
+
+    public void Write(ReadOnlySpan<float> samples)
+    {
+        if (samples.IsEmpty)
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            if (samples.Length >= _buffer.Length)
+            {
+                samples = samples[^_trimTargetSamples..];
+                _readPos = 0;
+                _writePos = 0;
+                _count = 0;
+            }
+
+            // Cap latency if a source bursts ahead of playback consumption.
+            var free = _buffer.Length - _count;
+            if (samples.Length > free)
+            {
+                var targetKeep = Math.Min(_trimTargetSamples, _buffer.Length - samples.Length);
+                var drop = Math.Max(0, _count - targetKeep);
+                if (drop > 0)
+                {
+                    _readPos = (_readPos + drop) % _buffer.Length;
+                    _count -= drop;
+                }
+            }
+
+            var firstCopy = Math.Min(samples.Length, _buffer.Length - _writePos);
+            samples[..firstCopy].CopyTo(_buffer.AsSpan(_writePos, firstCopy));
+            var remainder = samples.Length - firstCopy;
+            if (remainder > 0)
+            {
+                samples[firstCopy..].CopyTo(_buffer.AsSpan(0, remainder));
+            }
+
+            _writePos = (_writePos + samples.Length) % _buffer.Length;
+            _count += samples.Length;
+        }
+    }
+
+    public int ReadInto(Span<float> destination)
+    {
+        destination.Clear();
+        if (destination.IsEmpty)
+        {
+            return 0;
+        }
+
+        lock (_lock)
+        {
+            var toRead = Math.Min(destination.Length, _count);
+            if (toRead == 0)
+            {
+                return 0;
+            }
+
+            var firstPart = Math.Min(toRead, _buffer.Length - _readPos);
+            _buffer.AsSpan(_readPos, firstPart).CopyTo(destination);
+            var secondPart = toRead - firstPart;
+            if (secondPart > 0)
+            {
+                _buffer.AsSpan(0, secondPart).CopyTo(destination.Slice(firstPart));
+            }
+
+            _readPos = (_readPos + toRead) % _buffer.Length;
+            _count -= toRead;
+            return toRead;
+        }
+    }
+
+    public void Clear()
+    {
+        lock (_lock)
+        {
+            _readPos = 0;
+            _writePos = 0;
+            _count = 0;
+        }
+    }
+}
+
+/// <summary>
+/// Real-time IWaveProvider mixing synchronized 16 kHz Microphone + System Audio float streams with
+/// independent gain/mute controls, anti-clipping soft peak limiting, and upsampling to the virtual cable's WaveFormat.
+/// </summary>
+public sealed class SynchronizedMixedAudioWaveProvider : NAudio.Wave.IWaveProvider
+{
+    private readonly FloatSampleRingBuffer _micBuffer = new();
+    private readonly FloatSampleRingBuffer _sysBuffer = new();
+    private readonly Action<double>? _onLevelMeasured;
+
+    private float[] _micScratch = new float[1024];
+    private float[] _sysScratch = new float[1024];
+    private float[] _mixScratch = new float[1024];
+    private double _upsamplePhase;
+    private double _smoothedLevel;
+    private long _lastLevelTickMs;
+    private bool _lastEmittedZero = true;
+
+    private volatile float _micGain = 1.0f;
+    private volatile float _sysGain = 1.0f;
+    private volatile bool _micMuted;
+    private volatile bool _sysMuted;
+
+    public SynchronizedMixedAudioWaveProvider(WaveFormat targetFormat, Action<double>? onLevelMeasured = null)
+    {
+        ArgumentNullException.ThrowIfNull(targetFormat);
+        WaveFormat = targetFormat;
+        _onLevelMeasured = onLevelMeasured;
+    }
+
+    public WaveFormat WaveFormat { get; }
+
+    public void SetMicrophoneMix(double volumePercent, bool muted)
+    {
+        _micGain = (float)Math.Clamp(volumePercent / 100.0, 0.0, 2.0);
+        _micMuted = muted;
+        if (muted)
+        {
+            _micBuffer.Clear();
+        }
+    }
+
+    public void SetSystemAudioMix(double volumePercent, bool muted)
+    {
+        _sysGain = (float)Math.Clamp(volumePercent / 100.0, 0.0, 2.0);
+        _sysMuted = muted;
+        if (muted)
+        {
+            _sysBuffer.Clear();
+        }
+    }
+
+    public void PushMicrophoneFloat16k(ReadOnlySpan<float> samples)
+    {
+        if (!_micMuted)
+        {
+            _micBuffer.Write(samples);
+        }
+    }
+
+    public void PushSystemAudioFloat16k(ReadOnlySpan<float> samples)
+    {
+        if (!_sysMuted)
+        {
+            _sysBuffer.Write(samples);
+        }
+    }
+
+    public void Reset()
+    {
+        _micBuffer.Clear();
+        _sysBuffer.Clear();
+        _upsamplePhase = 0.0;
+        _smoothedLevel = 0.0;
+        _lastEmittedZero = true;
+    }
+
+    public int Read(byte[] buffer, int offset, int count) =>
+        Read(buffer.AsSpan(offset, count));
+
+    public int Read(Span<byte> buffer)
+    {
+        if (buffer.IsEmpty)
+        {
+            return 0;
+        }
+
+        var channels = Math.Max(1, WaveFormat.Channels);
+        var bytesPerSample = Math.Max(2, WaveFormat.BitsPerSample / 8);
+        var blockAlign = Math.Max(WaveFormat.BlockAlign, channels * bytesPerSample);
+        var outFrames = buffer.Length / blockAlign;
+        if (outFrames <= 0)
+        {
+            buffer.Clear();
+            return buffer.Length;
+        }
+
+        var step = (double)AudioProcessingHelper.TargetSpeechSampleRate / Math.Max(8000, WaveFormat.SampleRate);
+        var neededInSamples = (int)Math.Ceiling((outFrames * step) + _upsamplePhase) + 2;
+
+        if (_micScratch.Length < neededInSamples)
+        {
+            _micScratch = new float[neededInSamples];
+            _sysScratch = new float[neededInSamples];
+            _mixScratch = new float[neededInSamples];
+        }
+
+        var micSpan = _micScratch.AsSpan(0, neededInSamples);
+        var sysSpan = _sysScratch.AsSpan(0, neededInSamples);
+        var mixSpan = _mixScratch.AsSpan(0, neededInSamples);
+
+        // Compute integer 16k samples that advance during these outFrames (1e-9 prevents 960 * 1/3 = 319.9999999 rounding)
+        var totalStepAdvance = _upsamplePhase + (outFrames * step);
+        var consume16k = Math.Min(neededInSamples, (int)Math.Floor(totalStepAdvance + 1e-9));
+        _micBuffer.ReadInto(micSpan[..consume16k]);
+        _sysBuffer.ReadInto(sysSpan[..consume16k]);
+
+        var mGain = _micMuted ? 0f : _micGain;
+        var sGain = _sysMuted ? 0f : _sysGain;
+
+        float peak = 0f;
+        for (var i = 0; i < consume16k; i++)
+        {
+            var raw = (micSpan[i] * mGain) + (sysSpan[i] * sGain);
+            var softLimited = SoftLimitSample(raw);
+            mixSpan[i] = softLimited;
+            var abs = MathF.Abs(softLimited);
+            if (abs > peak)
+            {
+                peak = abs;
+            }
+        }
+
+        for (var i = consume16k; i < neededInSamples; i++)
+        {
+            mixSpan[i] = 0f;
+        }
+
+        var isFloat32 = AudioProcessingHelper.IsIeeeFloatFormat(WaveFormat) && WaveFormat.BitsPerSample == 32;
+        var phase = _upsamplePhase;
+        var maxIdx = Math.Max(0, consume16k - 1);
+
+        for (var f = 0; f < outFrames; f++)
+        {
+            var idx = Math.Clamp((int)Math.Floor(phase), 0, maxIdx);
+            var frac = (float)(phase - idx);
+            var s0 = consume16k > 0 ? mixSpan[idx] : 0f;
+            var s1 = (idx + 1 < consume16k) ? mixSpan[idx + 1] : s0;
+            var sample = consume16k > 0 ? Math.Clamp(s0 + ((s1 - s0) * frac), -0.98f, 0.98f) : 0f;
+
+            var framePos = f * blockAlign;
+            for (var ch = 0; ch < channels; ch++)
+            {
+                var samplePos = framePos + (ch * bytesPerSample);
+                if (isFloat32)
+                {
+                    BinaryPrimitives.WriteSingleLittleEndian(buffer.Slice(samplePos, 4), sample);
+                }
+                else
+                {
+                    var pcm16 = (short)Math.Clamp((int)Math.Round(sample * 32767f), short.MinValue, short.MaxValue);
+                    BinaryPrimitives.WriteInt16LittleEndian(buffer.Slice(samplePos, 2), pcm16);
+                }
+            }
+
+            phase += step;
+        }
+
+        _upsamplePhase = phase - consume16k;
+        if (_upsamplePhase < 0 || _upsamplePhase >= 1.0)
+        {
+            _upsamplePhase = 0.0;
+        }
+
+        EmitLevelIfChanged(peak);
+
+        return outFrames * blockAlign;
+    }
+
+    private void EmitLevelIfChanged(float peak)
+    {
+        if (_onLevelMeasured is null)
+        {
+            return;
+        }
+
+        var perceptual = peak > 0.001 ? Math.Pow(peak, 0.55) : 0.0;
+        _smoothedLevel = Math.Max(perceptual, _smoothedLevel * 0.72);
+        var current = _smoothedLevel < 0.002 ? 0.0 : Math.Clamp(_smoothedLevel, 0.0, 1.0);
+
+        var now = Environment.TickCount64;
+        if (now - _lastLevelTickMs >= 33)
+        {
+            var isZero = current <= 0.0;
+            if (!isZero || !_lastEmittedZero)
+            {
+                _lastLevelTickMs = now;
+                _lastEmittedZero = isZero;
+                _onLevelMeasured(current);
+            }
+        }
+    }
+
+    private static float SoftLimitSample(float x)
+    {
+        if (x is >= -0.85f and <= 0.85f)
+        {
+            return x;
+        }
+
+        // Smooth knee compression between 0.85 and 0.98 so simultaneous talking + loud call never hard-clips
+        var sign = x < 0f ? -1f : 1f;
+        var excess = MathF.Abs(x) - 0.85f;
+        var compressed = 0.85f + (0.13f * (excess / (excess + 0.13f)));
+        return sign * Math.Clamp(compressed, 0f, 0.98f);
+    }
+}
+
+/// <summary>
+/// Shared virtual audio cable identifiers used to prevent capture-playback feedback loops
+/// and locate signed virtual microphone routing targets.
+/// </summary>
+public static class VirtualAudioDriverCatalog
+{
+    public static bool IsVirtualAudioRenderSink(string? friendlyName)
+    {
+        if (string.IsNullOrWhiteSpace(friendlyName))
+        {
+            return false;
+        }
+
+        return friendlyName.Contains("CABLE Input", StringComparison.OrdinalIgnoreCase)
+            || friendlyName.Contains("Hi-Fi Cable Input", StringComparison.OrdinalIgnoreCase)
+            || friendlyName.Contains("VoiceMeeter Input", StringComparison.OrdinalIgnoreCase)
+            || friendlyName.Contains("VoiceMeeter Aux Input", StringComparison.OrdinalIgnoreCase)
+            || friendlyName.Contains("VoiceMeeter VAIO", StringComparison.OrdinalIgnoreCase)
+            || friendlyName.Contains("Virtual Audio Cable", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsVirtualLoopbackCaptureDevice(string? friendlyName)
+    {
+        if (string.IsNullOrWhiteSpace(friendlyName))
+        {
+            return false;
+        }
+
+        return friendlyName.Contains("CABLE Output", StringComparison.OrdinalIgnoreCase)
+            || friendlyName.Contains("Hi-Fi Cable Output", StringComparison.OrdinalIgnoreCase)
+            || friendlyName.Contains("VoiceMeeter Output", StringComparison.OrdinalIgnoreCase)
+            || friendlyName.Contains("VoiceMeeter Aux Output", StringComparison.OrdinalIgnoreCase)
+            || friendlyName.Contains("VoiceMeeter VAIO", StringComparison.OrdinalIgnoreCase)
+            || friendlyName.Contains("Virtual Audio Cable", StringComparison.OrdinalIgnoreCase)
+            || friendlyName.Contains("Stereo Mix", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string InferPairedCaptureMicHint(string? renderFriendlyName)
+    {
+        if (string.IsNullOrWhiteSpace(renderFriendlyName))
+        {
+            return "CABLE Output (VB-Audio Virtual Cable)";
+        }
+
+        if (renderFriendlyName.Contains("CABLE Input", StringComparison.OrdinalIgnoreCase))
+        {
+            return renderFriendlyName.Replace("CABLE Input", "CABLE Output", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (renderFriendlyName.Contains("Hi-Fi Cable Input", StringComparison.OrdinalIgnoreCase))
+        {
+            return renderFriendlyName.Replace("Hi-Fi Cable Input", "Hi-Fi Cable Output", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (renderFriendlyName.Contains("VoiceMeeter Aux Input", StringComparison.OrdinalIgnoreCase))
+        {
+            return renderFriendlyName.Replace("VoiceMeeter Aux Input", "VoiceMeeter Aux Output", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (renderFriendlyName.Contains("VoiceMeeter Input", StringComparison.OrdinalIgnoreCase))
+        {
+            return renderFriendlyName.Replace("VoiceMeeter Input", "VoiceMeeter Output", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return renderFriendlyName;
+    }
+}

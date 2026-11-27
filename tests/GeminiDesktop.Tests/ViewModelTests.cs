@@ -88,6 +88,7 @@ public sealed class ViewModelTests : IDisposable
         public void StopCapture() { }
         public void SetMutedSuppression(bool muted) { }
         public void SetPcmSink(Pcm16kSpanHandler? sink) { }
+        public void SetMonitorFloatSink(Float16kSpanHandler? sink) { }
         public void Dispose()
         {
             _ = AudioLevelMeasured;
@@ -123,6 +124,7 @@ public sealed class ViewModelTests : IDisposable
         public void StopCapture() { }
         public void SetMutedSuppression(bool muted) { }
         public void SetPcmSink(Pcm16kSpanHandler? sink) { }
+        public void SetMonitorFloatSink(Float16kSpanHandler? sink) { }
         public void Dispose()
         {
             _ = AudioLevelMeasured;
@@ -156,6 +158,27 @@ public sealed class ViewModelTests : IDisposable
         }
     }
 
+    private sealed class StubMixedAudioRouterBackend : IMixedAudioRouterBackend
+    {
+        public event EventHandler<Exception?>? RoutingStoppedUnexpectedly;
+        public event EventHandler? DevicesTopologyChanged;
+
+        public IReadOnlyList<VirtualAudioOutputDevice> EnumerateVirtualOutputs() => [];
+        public NAudio.Wave.WaveFormat ResolveOutputWaveFormat(string deviceId) =>
+            NAudio.Wave.WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
+        public void StartRouting(string deviceId, NAudio.Wave.IWaveProvider mixedWaveProvider, out string friendlyName, out string pairedCaptureHint)
+        {
+            friendlyName = "CABLE Input";
+            pairedCaptureHint = "CABLE Output";
+        }
+        public void StopRouting() { }
+        public void Dispose()
+        {
+            _ = RoutingStoppedUnexpectedly;
+            _ = DevicesTopologyChanged;
+        }
+    }
+
     private (
         LoggingService Log,
         SettingsService Settings,
@@ -164,6 +187,7 @@ public sealed class ViewModelTests : IDisposable
         MicrophoneService Mic,
         SystemAudioService SysAudio,
         SpeechTranscriptionService Transcription,
+        MixedAudioRouterService MixedAudio,
         WebViewService WebView,
         GeminiBrowserService Browser) CreateServices()
     {
@@ -177,9 +201,11 @@ public sealed class ViewModelTests : IDisposable
         sys.Initialize();
         var tx = new SpeechTranscriptionService(new StubSpeechTranscriptionBackend(), mic, sys, settings, log);
         tx.Initialize();
+        var mixed = new MixedAudioRouterService(new StubMixedAudioRouterBackend(), mic, sys, settings, log);
+        mixed.Initialize();
         var webView = new WebViewService(log, settings, mic);
         var browser = new GeminiBrowserService(webView, settings, log);
-        return (log, settings, window, privacy, mic, sys, tx, webView, browser);
+        return (log, settings, window, privacy, mic, sys, tx, mixed, webView, browser);
     }
 
     [Fact]
@@ -191,6 +217,7 @@ public sealed class ViewModelTests : IDisposable
         using var mic = ctx.Mic;
         using var sys = ctx.SysAudio;
         using var tx = ctx.Transcription;
+        using var mixed = ctx.MixedAudio;
         using var wv = ctx.WebView;
         using var br = ctx.Browser;
         var themeService = new StubThemeService();
@@ -217,13 +244,14 @@ public sealed class ViewModelTests : IDisposable
         using var mic = ctx.Mic;
         using var sys = ctx.SysAudio;
         using var tx = ctx.Transcription;
+        using var mixed = ctx.MixedAudio;
         using var wv = ctx.WebView;
         using var br = ctx.Browser;
         var themeService = new StubThemeService();
         var dialogService = new StubDialogService(confirmResult: true);
 
         var homeVm = new HomeViewModel(br, ctx.Privacy, ctx.Settings);
-        var geminiVm = new GeminiViewModel(br, mic, sys, tx, ctx.Settings);
+        var geminiVm = new GeminiViewModel(br, mic, sys, tx, mixed, ctx.Settings);
         var mainVm = new MainViewModel(
             ctx.Settings,
             window,
@@ -278,6 +306,7 @@ public sealed class ViewModelTests : IDisposable
         using var mic = ctx.Mic;
         using var sys = ctx.SysAudio;
         using var tx = ctx.Transcription;
+        using var mixed = ctx.MixedAudio;
         using var wv = ctx.WebView;
         using var br = ctx.Browser;
         var themeService = new StubThemeService();
@@ -291,7 +320,7 @@ public sealed class ViewModelTests : IDisposable
             br,
             log,
             new HomeViewModel(br, ctx.Privacy, ctx.Settings),
-            new GeminiViewModel(br, mic, sys, tx, ctx.Settings),
+            new GeminiViewModel(br, mic, sys, tx, mixed, ctx.Settings),
             settingsVm,
             new PrivacyViewModel(ctx.Privacy, window, dialogService),
             new AboutViewModel(log, br));
@@ -375,11 +404,12 @@ public sealed class ViewModelTests : IDisposable
         using var mic = ctx.Mic;
         using var sys = ctx.SysAudio;
         using var tx = ctx.Transcription;
+        using var mixed = ctx.MixedAudio;
         using var wv = ctx.WebView;
         using var br = ctx.Browser;
         var themeService = new StubThemeService();
         var dialogService = new StubDialogService(confirmResult: true);
-        var geminiVm = new GeminiViewModel(br, mic, sys, tx, ctx.Settings);
+        var geminiVm = new GeminiViewModel(br, mic, sys, tx, mixed, ctx.Settings);
 
         var mainVm = new MainViewModel(
             ctx.Settings,

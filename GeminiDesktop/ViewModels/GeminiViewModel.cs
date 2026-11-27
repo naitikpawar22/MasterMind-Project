@@ -18,12 +18,14 @@ public sealed class GeminiViewModel : ViewModelBase
     private readonly IMicrophoneService _microphoneService;
     private readonly ISystemAudioService _systemAudioService;
     private readonly ISpeechTranscriptionService _transcriptionService;
+    private readonly IMixedAudioRouterService _mixedAudioService;
     private readonly ISettingsService _settingsService;
 
     private BrowserState _state;
     private MicrophoneState _micState;
     private SystemAudioState _sysState;
     private TranscriptionState _txState;
+    private MixedAudioState _mixedState;
     private bool _isToolbarVisible = true;
     private bool _isAudioPanelVisible = true;
     private string _microphoneAlertBanner = string.Empty;
@@ -34,18 +36,21 @@ public sealed class GeminiViewModel : ViewModelBase
         IMicrophoneService microphoneService,
         ISystemAudioService systemAudioService,
         ISpeechTranscriptionService transcriptionService,
+        IMixedAudioRouterService mixedAudioService,
         ISettingsService settingsService)
     {
         _browserService = browserService;
         _microphoneService = microphoneService;
         _systemAudioService = systemAudioService;
         _transcriptionService = transcriptionService;
+        _mixedAudioService = mixedAudioService;
         _settingsService = settingsService;
 
         _state = _browserService.State;
         _micState = _microphoneService.CurrentState;
         _sysState = _systemAudioService.CurrentState;
         _txState = _transcriptionService.CurrentState;
+        _mixedState = _mixedAudioService.CurrentState;
         _isAudioPanelVisible = _settingsService.CurrentSettings.IsAudioPanelVisible;
 
         BackCommand = new RelayCommand(() => _browserService.GoBack(), () => CanGoBack);
@@ -83,6 +88,13 @@ public sealed class GeminiViewModel : ViewModelBase
         RefreshSystemAudioCommand = new RelayCommand(() => _systemAudioService.RefreshDevice());
         OpenWindowsSoundSettingsCommand = new RelayCommand(() => _systemAudioService.OpenWindowsSoundSettings());
 
+        // Mixed Audio -> Gemini Virtual Mic commands
+        ToggleMixedRoutingCommand = new RelayCommand(() => IsMixedRoutingEnabled = !IsMixedRoutingEnabled);
+        RefreshMixedDriversCommand = new RelayCommand(() => _mixedAudioService.RefreshDevices());
+        ToggleMixedMicMuteCommand = new RelayCommand(() => _mixedAudioService.ToggleMicrophoneMixMute());
+        ToggleMixedSysMuteCommand = new RelayCommand(() => _mixedAudioService.ToggleSystemAudioMixMute());
+        OpenVirtualAudioDriverPageCommand = new RelayCommand(() => _mixedAudioService.OpenVirtualAudioDriverWebsite());
+
         // Dual + Transcription commands
         StartBothAudioCommand = new RelayCommand(() => _transcriptionService.StartAllSources());
         StopBothAudioCommand = new RelayCommand(() => _transcriptionService.StopAllSources());
@@ -94,6 +106,7 @@ public sealed class GeminiViewModel : ViewModelBase
         _microphoneService.StateChanged += (_, updated) => RunOnUiThread(() => ApplyMicrophoneState(updated));
         _systemAudioService.StateChanged += (_, updated) => RunOnUiThread(() => ApplySystemAudioState(updated));
         _transcriptionService.StateChanged += (_, updated) => RunOnUiThread(() => ApplyTranscriptionState(updated));
+        _mixedAudioService.StateChanged += (_, updated) => RunOnUiThread(() => ApplyMixedAudioState(updated));
     }
 
     public event EventHandler? ReinitializeRequested;
@@ -120,6 +133,12 @@ public sealed class GeminiViewModel : ViewModelBase
     public RelayCommand ToggleSystemAudioMuteCommand { get; }
     public ICommand RefreshSystemAudioCommand { get; }
     public ICommand OpenWindowsSoundSettingsCommand { get; }
+
+    public ICommand ToggleMixedRoutingCommand { get; }
+    public ICommand RefreshMixedDriversCommand { get; }
+    public ICommand ToggleMixedMicMuteCommand { get; }
+    public ICommand ToggleMixedSysMuteCommand { get; }
+    public ICommand OpenVirtualAudioDriverPageCommand { get; }
 
     public ICommand StartBothAudioCommand { get; }
     public ICommand StopBothAudioCommand { get; }
@@ -244,6 +263,80 @@ public sealed class GeminiViewModel : ViewModelBase
             : _sysState.IsMuted
                 ? $"System Audio capture muted (PC speakers remain audible) — Click to unmute"
                 : $"System Audio active ({_sysState.ActiveDeviceName}) · Level {_sysState.OutputLevelPercent}% — Click to mute";
+
+    // Gemini Mixed Audio Routing properties (Mic + System Audio -> Signed Virtual Mic Driver)
+    public bool IsMixedRoutingEnabled
+    {
+        get => _mixedState.IsEnabled;
+        set
+        {
+            if (_mixedState.IsEnabled != value)
+            {
+                _mixedAudioService.SetEnabled(value);
+            }
+        }
+    }
+
+    public bool IsMixedAudioStreaming => _mixedState.IsStreaming;
+    public bool IsVirtualDriverInstalled => _mixedState.IsDriverInstalled;
+    public IReadOnlyList<VirtualAudioOutputDevice> MixedVirtualOutputs => _mixedState.AvailableOutputs;
+
+    public string SelectedMixedOutputDeviceId
+    {
+        get => _mixedState.SelectedOutputDeviceId;
+        set
+        {
+            if (!string.Equals(_mixedState.SelectedOutputDeviceId, value ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+            {
+                _mixedAudioService.SelectOutputDevice(value ?? string.Empty);
+            }
+        }
+    }
+
+    public int MixedMicrophoneVolumePercent
+    {
+        get => _mixedState.MicrophoneVolumePercent;
+        set
+        {
+            if (_mixedState.MicrophoneVolumePercent != value)
+            {
+                _mixedAudioService.SetMicrophoneMixVolume(value);
+            }
+        }
+    }
+
+    public int MixedSystemAudioVolumePercent
+    {
+        get => _mixedState.SystemAudioVolumePercent;
+        set
+        {
+            if (_mixedState.SystemAudioVolumePercent != value)
+            {
+                _mixedAudioService.SetSystemAudioMixVolume(value);
+            }
+        }
+    }
+
+    public bool IsMixedMicMuted => _mixedState.IsMicrophoneMixMuted;
+    public bool IsMixedSysMuted => _mixedState.IsSystemAudioMixMuted;
+    public string MixedMicMuteButtonText => _mixedState.IsMicrophoneMixMuted ? "Unmute Mic Mix" : "Mute Mic Mix";
+    public string MixedSysMuteButtonText => _mixedState.IsSystemAudioMixMuted ? "Unmute Sys Mix" : "Mute Sys Mix";
+    public int MixedOutputLevelPercent => _mixedState.MixedOutputLevelPercent;
+    public string MixedOutputDeviceName => _mixedState.ActiveOutputDeviceName;
+    public string MixedCaptureMicHint => _mixedState.PairedCaptureMicHint;
+    public string MixedStatusText => _mixedState.StatusText;
+    public string MixedDependencyMessage => _mixedState.DependencyMessage ?? string.Empty;
+    public string MixedErrorMessage => _mixedState.ErrorMessage ?? string.Empty;
+
+    public string MixedToolbarBadgeText => _mixedState.IsStreaming
+        ? "Mixed → Gemini ON"
+        : (_mixedState.IsDriverInstalled ? "Mixed Feed Off" : "Mixed: Driver Setup");
+
+    public string MixedToolbarTooltip => _mixedState.IsStreaming
+        ? $"Actively streaming Microphone + System Audio to '{_mixedState.ActiveOutputDeviceName}'. Ensure Gemini microphone is set to '{_mixedState.PairedCaptureMicHint}'."
+        : (_mixedState.IsDriverInstalled
+            ? $"Click to route mixed Microphone + System Audio to '{_mixedState.PairedCaptureMicHint}' for Gemini"
+            : _mixedState.DependencyMessage ?? "Install VB-Audio Virtual Cable to feed mixed audio to Gemini");
 
     // Speech-to-Text properties
     public bool IsLiveTranscriptionEnabled
@@ -444,6 +537,39 @@ public sealed class GeminiViewModel : ViewModelBase
 
         SyncTranscriptCollection(updated.Entries);
         OnPropertyChanged(nameof(HasTranscriptEntries));
+    }
+
+    private void ApplyMixedAudioState(MixedAudioState updated)
+    {
+        var prev = _mixedState;
+        _mixedState = updated;
+        if (!ReferenceEquals(prev.AvailableOutputs, updated.AvailableOutputs))
+        {
+            OnPropertyChanged(nameof(MixedVirtualOutputs));
+        }
+
+        if (!string.Equals(prev.SelectedOutputDeviceId, updated.SelectedOutputDeviceId, StringComparison.OrdinalIgnoreCase))
+        {
+            OnPropertyChanged(nameof(SelectedMixedOutputDeviceId));
+        }
+
+        OnPropertyChanged(nameof(IsMixedRoutingEnabled));
+        OnPropertyChanged(nameof(IsMixedAudioStreaming));
+        OnPropertyChanged(nameof(IsVirtualDriverInstalled));
+        OnPropertyChanged(nameof(MixedMicrophoneVolumePercent));
+        OnPropertyChanged(nameof(MixedSystemAudioVolumePercent));
+        OnPropertyChanged(nameof(IsMixedMicMuted));
+        OnPropertyChanged(nameof(IsMixedSysMuted));
+        OnPropertyChanged(nameof(MixedMicMuteButtonText));
+        OnPropertyChanged(nameof(MixedSysMuteButtonText));
+        OnPropertyChanged(nameof(MixedOutputLevelPercent));
+        OnPropertyChanged(nameof(MixedOutputDeviceName));
+        OnPropertyChanged(nameof(MixedCaptureMicHint));
+        OnPropertyChanged(nameof(MixedStatusText));
+        OnPropertyChanged(nameof(MixedDependencyMessage));
+        OnPropertyChanged(nameof(MixedErrorMessage));
+        OnPropertyChanged(nameof(MixedToolbarBadgeText));
+        OnPropertyChanged(nameof(MixedToolbarTooltip));
     }
 
     private void SyncTranscriptCollection(IReadOnlyList<TranscriptEntry> target)
