@@ -8,10 +8,10 @@ using NAudio.Wave;
 namespace GeminiDesktop.Services;
 
 /// <summary>
-/// Abstraction over virtual audio playback rendering so mixed Mic + System Audio can feed a signed
-/// Windows virtual microphone driver (such as VB-Audio Virtual Cable / VoiceMeeter) without bypassing browser security.
+/// Abstraction over virtual audio playback rendering so mixed System Audio (Teams/Zoom/Meet) + Microphone audio
+/// feeds a signed Windows virtual microphone driver (CABLE Input -> CABLE Output) without bypassing browser security.
 /// </summary>
-public interface IMixedAudioRouterBackend : IDisposable
+public interface IDualAudioMixerBackend : IDisposable
 {
     event EventHandler<Exception?>? RoutingStoppedUnexpectedly;
     event EventHandler? DevicesTopologyChanged;
@@ -24,9 +24,9 @@ public interface IMixedAudioRouterBackend : IDisposable
 
 /// <summary>
 /// Real Windows WASAPI virtual-cable playback backend using NAudio WasapiPlayerBuilder.
-/// Refuses non-virtual physical speaker/headphone devices to guarantee zero loopback or acoustic feedback loops.
+/// Refuses physical speakers/headphones to prevent acoustic or loopback feedback loops.
 /// </summary>
-public sealed class WasapiMixedAudioRouterBackend : IMixedAudioRouterBackend
+public sealed class WasapiDualAudioMixerBackend : IDualAudioMixerBackend
 {
     private readonly MMDeviceEnumerator _enumerator;
     private readonly MMDeviceNotificationClient? _notificationClient;
@@ -37,7 +37,7 @@ public sealed class WasapiMixedAudioRouterBackend : IMixedAudioRouterBackend
     private volatile bool _routing;
     private bool _disposed;
 
-    public WasapiMixedAudioRouterBackend()
+    public WasapiDualAudioMixerBackend()
     {
         _enumerator = new MMDeviceEnumerator();
 
@@ -76,6 +76,7 @@ public sealed class WasapiMixedAudioRouterBackend : IMixedAudioRouterBackend
                         continue;
                     }
 
+                    // Skip 16-channel CABLE In 16ch if 2-channel CABLE Input exists cleanly, unless ordered secondary
                     var hint = VirtualAudioDriverCatalog.InferPairedCaptureMicHint(device.FriendlyName);
                     list.Add(new VirtualAudioOutputDevice(device.ID, device.FriendlyName, hint));
                 }
@@ -86,7 +87,11 @@ public sealed class WasapiMixedAudioRouterBackend : IMixedAudioRouterBackend
             // Return discovered virtual endpoints so far.
         }
 
-        return list;
+        return list
+            .OrderByDescending(d => d.FriendlyName.Contains("CABLE Input", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(d => d.FriendlyName.Contains("16ch", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(d => d.FriendlyName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     public WaveFormat ResolveOutputWaveFormat(string deviceId)
@@ -260,10 +265,10 @@ public sealed class WasapiMixedAudioRouterBackend : IMixedAudioRouterBackend
 }
 
 /// <summary>
-/// Mixes live physical Microphone audio and Windows System Audio loopback into one synchronized stream
-/// routed cleanly into a signed Windows virtual microphone driver (without modifying right-side transcription).
+/// Mixes live physical Microphone and Windows System Audio (Teams/Meet/Zoom) via NAudio MixingSampleProvider
+/// into CABLE Input (VB-Audio Virtual Cable), with an automatic 400ms Echo/Feedback Guard driven by WebView2 audio playback.
 /// </summary>
-public interface IMixedAudioRouterService : IDisposable
+public interface IDualAudioMixerService : IDisposable
 {
     MixedAudioState CurrentState { get; }
 
@@ -281,19 +286,22 @@ public interface IMixedAudioRouterService : IDisposable
     void OpenWindowsSoundSettings();
 }
 
-public sealed class MixedAudioRouterService : IMixedAudioRouterService
+public sealed class DualAudioMixerService : IDualAudioMixerService
 {
     public const string AutoVirtualCableId = "";
     private const string VirtualAudioDownloadUrl = "https://vb-audio.com/Cable/";
+    private const int EchoGuardReleaseDelayMs = 400;
     private const int ErrorAccessDeniedHResult = unchecked((int)0x80070005);
 
-    private readonly IMixedAudioRouterBackend _backend;
+    private readonly IDualAudioMixerBackend _backend;
     private readonly IMicrophoneService _microphoneService;
     private readonly ISystemAudioService _systemAudioService;
+    private readonly IGeminiBrowserService _browserService;
     private readonly ISettingsService _settingsService;
     private readonly ILoggingService _loggingService;
     private readonly object _sync = new();
     private readonly Timer _topologyDebounceTimer;
+    private readonly Timer _echoGuardReleaseTimer;
 
     private SynchronizedMixedAudioWaveProvider? _activeProvider;
     private MixedAudioState _state = new();
@@ -304,31 +312,38 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
     private int _sysVolumePercent = 100;
     private bool _isMicMixMuted;
     private bool _isSysMixMuted;
+    private bool _isGeminiPlayingAudio;
+    private bool _isEchoGuardActive;
     private volatile bool _disposing;
     private bool _disposed;
 
-    public MixedAudioRouterService(
-        IMixedAudioRouterBackend backend,
+    public DualAudioMixerService(
+        IDualAudioMixerBackend backend,
         IMicrophoneService microphoneService,
         ISystemAudioService systemAudioService,
+        IGeminiBrowserService browserService,
         ISettingsService settingsService,
         ILoggingService loggingService)
     {
         _backend = backend;
         _microphoneService = microphoneService;
         _systemAudioService = systemAudioService;
+        _browserService = browserService;
         _settingsService = settingsService;
         _loggingService = loggingService;
 
         _topologyDebounceTimer = new Timer(_ => RefreshDevices(), null, Timeout.Infinite, Timeout.Infinite);
+        _echoGuardReleaseTimer = new Timer(OnEchoGuardReleaseElapsed, null, Timeout.Infinite, Timeout.Infinite);
+
         _backend.RoutingStoppedUnexpectedly += OnRoutingStoppedUnexpectedly;
         _backend.DevicesTopologyChanged += OnDevicesTopologyChanged;
+        _browserService.DocumentPlayingAudioChanged += OnGeminiDocumentPlayingAudioChanged;
 
         var settings = _settingsService.CurrentSettings;
         _isEnabled = settings.EnableGeminiMixedAudioRouting;
         _selectedOutputId = settings.PreferredMixedOutputDeviceId ?? AutoVirtualCableId;
-        _micVolumePercent = Math.Clamp(settings.MixedMicrophoneVolumePercent, 0, 200);
-        _sysVolumePercent = Math.Clamp(settings.MixedSystemAudioVolumePercent, 0, 200);
+        _micVolumePercent = Math.Clamp(settings.MixedMicrophoneVolumePercent, 0, 150);
+        _sysVolumePercent = Math.Clamp(settings.MixedSystemAudioVolumePercent, 0, 150);
     }
 
     public MixedAudioState CurrentState => _state;
@@ -360,8 +375,8 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
                 _activeOutputEndpointId = null;
 
                 var depMessage =
-                    "Gemini inside WebView2 reads audio strictly from a real Windows Microphone device. " +
-                    "To send mixed Microphone + Meeting Audio into Gemini without feedback or browser bypasses, install a signed Windows virtual audio cable driver (e.g., VB-Audio Virtual Cable), then set 'CABLE Output' as Gemini/Windows mic.";
+                    "Gemini inside WebView2 reads audio from a real Windows Microphone device. " +
+                    "Install VB-Audio Virtual Cable (CABLE Input / CABLE Output) and select 'CABLE Output' for Gemini to hear Microphone + System Audio (Teams).";
 
                 UpdateStateLocked(new MixedAudioState
                 {
@@ -376,6 +391,7 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
                     SystemAudioVolumePercent = _sysVolumePercent,
                     IsMicrophoneMixMuted = _isMicMixMuted,
                     IsSystemAudioMixMuted = _isSysMixMuted,
+                    IsEchoGuardActive = false,
                     MixedOutputLevel = 0.0,
                     StatusText = notificationStatus ?? (_isEnabled
                         ? "Virtual Audio Driver required (CABLE Output missing)"
@@ -409,6 +425,7 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
                     SystemAudioVolumePercent = _sysVolumePercent,
                     IsMicrophoneMixMuted = _isMicMixMuted,
                     IsSystemAudioMixMuted = _isSysMixMuted,
+                    IsEchoGuardActive = _isEchoGuardActive,
                     MixedOutputLevel = 0.0,
                     StatusText = effectiveStatus ?? $"Ready (Off) · Virtual Mic: {target.PairedCaptureHint}",
                     DependencyMessage = null,
@@ -425,9 +442,10 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
                     activeOutputDeviceName: target.FriendlyName,
                     pairedCaptureMicHint: target.PairedCaptureHint,
                     isDriverInstalled: true,
+                    isEchoGuardActive: _isEchoGuardActive,
                     dependencyMessage: string.Empty,
                     errorMessage: string.Empty,
-                    statusText: effectiveStatus ?? $"Streaming Mixed Audio → {target.PairedCaptureHint}"));
+                    statusText: effectiveStatus ?? FormatStreamingStatus(target.PairedCaptureHint)));
                 return;
             }
 
@@ -437,6 +455,7 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
                 var provider = new SynchronizedMixedAudioWaveProvider(waveFormat, OnMixedLevelMeasured);
                 provider.SetMicrophoneMix(_micVolumePercent, _isMicMixMuted);
                 provider.SetSystemAudioMix(_sysVolumePercent, _isSysMixMuted);
+                provider.SetEchoGuardSuppressed(_isEchoGuardActive);
 
                 _activeProvider = provider;
                 _backend.StartRouting(target.Id, provider, out var friendlyName, out var pairedHint);
@@ -455,13 +474,14 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
                     SystemAudioVolumePercent = _sysVolumePercent,
                     IsMicrophoneMixMuted = _isMicMixMuted,
                     IsSystemAudioMixMuted = _isSysMixMuted,
+                    IsEchoGuardActive = _isEchoGuardActive,
                     MixedOutputLevel = 0.0,
-                    StatusText = effectiveStatus ?? $"Streaming Mixed Audio → {pairedHint}",
+                    StatusText = effectiveStatus ?? FormatStreamingStatus(pairedHint),
                     DependencyMessage = null,
                     ErrorMessage = null
                 });
 
-                _loggingService.Information("Mixed Audio → Gemini Virtual Cable started on '{Output}' (Gemini Mic: '{CaptureHint}').",
+                _loggingService.Information("DualAudioMixer started 48kHz IEEE Float stream on '{Output}' (Gemini Mic: '{CaptureHint}').",
                     friendlyName, pairedHint);
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException || (ex is COMException comEx && comEx.HResult == ErrorAccessDeniedHResult))
@@ -481,6 +501,7 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
                     SystemAudioVolumePercent = _sysVolumePercent,
                     IsMicrophoneMixMuted = _isMicMixMuted,
                     IsSystemAudioMixMuted = _isSysMixMuted,
+                    IsEchoGuardActive = _isEchoGuardActive,
                     MixedOutputLevel = 0.0,
                     StatusText = "Virtual audio output permission denied",
                     ErrorMessage = $"Windows blocked playback routing to '{target.FriendlyName}': {ex.Message}"
@@ -503,6 +524,7 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
                     SystemAudioVolumePercent = _sysVolumePercent,
                     IsMicrophoneMixMuted = _isMicMixMuted,
                     IsSystemAudioMixMuted = _isSysMixMuted,
+                    IsEchoGuardActive = _isEchoGuardActive,
                     MixedOutputLevel = 0.0,
                     StatusText = $"Mixed routing unavailable: {target.FriendlyName}",
                     ErrorMessage = $"Could not open virtual audio output '{target.FriendlyName}': {ex.Message}"
@@ -526,7 +548,6 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
             _settingsService.SaveSettings(updated);
         }
 
-        // Ensure underlying captures are running when user enables Gemini mixed feed.
         if (enabled)
         {
             if (!_microphoneService.CurrentState.IsMonitoring)
@@ -565,7 +586,7 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
 
     public void SetMicrophoneMixVolume(int percent)
     {
-        var clamped = Math.Clamp(percent, 0, 200);
+        var clamped = Math.Clamp(percent, 0, 150);
         lock (_sync)
         {
             if (_micVolumePercent == clamped)
@@ -586,7 +607,7 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
 
     public void SetSystemAudioMixVolume(int percent)
     {
-        var clamped = Math.Clamp(percent, 0, 200);
+        var clamped = Math.Clamp(percent, 0, 150);
         lock (_sync)
         {
             if (_sysVolumePercent == clamped)
@@ -639,6 +660,66 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
 
     public void OpenWindowsSoundSettings() => _systemAudioService.OpenWindowsSoundSettings();
 
+    private void OnGeminiDocumentPlayingAudioChanged(object? sender, bool isPlaying)
+    {
+        lock (_sync)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _isGeminiPlayingAudio = isPlaying;
+            if (isPlaying)
+            {
+                _echoGuardReleaseTimer.Change(Timeout.Infinite, Timeout.Infinite);
+                if (!_isEchoGuardActive)
+                {
+                    _isEchoGuardActive = true;
+                    _activeProvider?.SetEchoGuardSuppressed(true);
+                    _loggingService.Debug("Echo Guard engaged: pausing System Audio feed into CABLE Input while Gemini speaks.");
+                    if (_state.IsStreaming)
+                    {
+                        UpdateStateLocked(CopyWith(_state,
+                            isEchoGuardActive: true,
+                            statusText: FormatStreamingStatus(_state.PairedCaptureMicHint)));
+                    }
+                }
+            }
+            else if (_isEchoGuardActive)
+            {
+                // Keep System Audio suppressed for 400ms after Gemini stops speaking to prevent tail echo.
+                _echoGuardReleaseTimer.Change(EchoGuardReleaseDelayMs, Timeout.Infinite);
+            }
+        }
+    }
+
+    private void OnEchoGuardReleaseElapsed(object? state)
+    {
+        lock (_sync)
+        {
+            if (_disposed || _isGeminiPlayingAudio || !_isEchoGuardActive)
+            {
+                return;
+            }
+
+            _isEchoGuardActive = false;
+            _activeProvider?.SetEchoGuardSuppressed(false);
+            _loggingService.Debug("Echo Guard released 400ms after Gemini stopped speaking.");
+            if (_state.IsStreaming)
+            {
+                UpdateStateLocked(CopyWith(_state,
+                    isEchoGuardActive: false,
+                    statusText: FormatStreamingStatus(_state.PairedCaptureMicHint)));
+            }
+        }
+    }
+
+    private string FormatStreamingStatus(string pairedHint) =>
+        _isEchoGuardActive
+            ? $"Echo Guard Active (Gemini speaking) · Mic live → {pairedHint}"
+            : $"Streaming Mixed Audio → {pairedHint}";
+
     private void OnMicrophoneFloat16k(ReadOnlySpan<float> samples)
     {
         if (!_isEnabled || _disposing)
@@ -655,7 +736,7 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
 
     private void OnSystemAudioFloat16k(ReadOnlySpan<float> samples)
     {
-        if (!_isEnabled || _disposing)
+        if (!_isEnabled || _disposing || _isEchoGuardActive)
         {
             return;
         }
@@ -778,6 +859,7 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
         int? sysVolumePercent = null,
         bool? isMicMixMuted = null,
         bool? isSysMixMuted = null,
+        bool? isEchoGuardActive = null,
         double? mixedOutputLevel = null,
         string? statusText = null,
         string? dependencyMessage = null,
@@ -796,6 +878,7 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
             SystemAudioVolumePercent = sysVolumePercent ?? src.SystemAudioVolumePercent,
             IsMicrophoneMixMuted = isMicMixMuted ?? src.IsMicrophoneMixMuted,
             IsSystemAudioMixMuted = isSysMixMuted ?? src.IsSystemAudioMixMuted,
+            IsEchoGuardActive = isEchoGuardActive ?? src.IsEchoGuardActive,
             MixedOutputLevel = mixedOutputLevel ?? src.MixedOutputLevel,
             StatusText = statusText ?? src.StatusText,
             DependencyMessage = dependencyMessage is null ? src.DependencyMessage : (dependencyMessage.Length == 0 ? null : dependencyMessage),
@@ -808,6 +891,7 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
         _disposing = true;
         _backend.RoutingStoppedUnexpectedly -= OnRoutingStoppedUnexpectedly;
         _backend.DevicesTopologyChanged -= OnDevicesTopologyChanged;
+        _browserService.DocumentPlayingAudioChanged -= OnGeminiDocumentPlayingAudioChanged;
 
         _microphoneService.SetMonitorFloatSink(null);
         _systemAudioService.SetMonitorFloatSink(null);
@@ -821,6 +905,7 @@ public sealed class MixedAudioRouterService : IMixedAudioRouterService
 
             _disposed = true;
             _topologyDebounceTimer.Dispose();
+            _echoGuardReleaseTimer.Dispose();
             StopRoutingLocked();
             _backend.Dispose();
         }

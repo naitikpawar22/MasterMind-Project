@@ -158,7 +158,7 @@ public sealed class ViewModelTests : IDisposable
         }
     }
 
-    private sealed class StubMixedAudioRouterBackend : IMixedAudioRouterBackend
+    private sealed class StubDualAudioMixerBackend : IDualAudioMixerBackend
     {
         public event EventHandler<Exception?>? RoutingStoppedUnexpectedly;
         public event EventHandler? DevicesTopologyChanged;
@@ -168,8 +168,8 @@ public sealed class ViewModelTests : IDisposable
             NAudio.Wave.WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
         public void StartRouting(string deviceId, NAudio.Wave.IWaveProvider mixedWaveProvider, out string friendlyName, out string pairedCaptureHint)
         {
-            friendlyName = "CABLE Input";
-            pairedCaptureHint = "CABLE Output";
+            friendlyName = "CABLE Input (VB-Audio Virtual Cable)";
+            pairedCaptureHint = "CABLE Output (VB-Audio Virtual Cable)";
         }
         public void StopRouting() { }
         public void Dispose()
@@ -177,6 +177,24 @@ public sealed class ViewModelTests : IDisposable
             _ = RoutingStoppedUnexpectedly;
             _ = DevicesTopologyChanged;
         }
+    }
+
+    private sealed class StubMeetingRecorderBackend : IMeetingRecorderBackend
+    {
+        public event EventHandler<string>? RecordingCompleted;
+        public event EventHandler<string>? RecordingFailed;
+
+        public string? LastOutputFilePath { get; private set; }
+        public void StartRecording(string outputFilePath, string? preferredMixCaptureHint, bool preferVirtualCableInput) =>
+            LastOutputFilePath = outputFilePath;
+        public void StopRecording()
+        {
+            if (!string.IsNullOrWhiteSpace(LastOutputFilePath))
+            {
+                RecordingCompleted?.Invoke(this, LastOutputFilePath);
+            }
+        }
+        public void Dispose() => _ = RecordingFailed;
     }
 
     private (
@@ -187,7 +205,8 @@ public sealed class ViewModelTests : IDisposable
         MicrophoneService Mic,
         SystemAudioService SysAudio,
         SpeechTranscriptionService Transcription,
-        MixedAudioRouterService MixedAudio,
+        DualAudioMixerService MixedAudio,
+        MeetingRecorderService Recorder,
         WebViewService WebView,
         GeminiBrowserService Browser) CreateServices()
     {
@@ -201,11 +220,12 @@ public sealed class ViewModelTests : IDisposable
         sys.Initialize();
         var tx = new SpeechTranscriptionService(new StubSpeechTranscriptionBackend(), mic, sys, settings, log);
         tx.Initialize();
-        var mixed = new MixedAudioRouterService(new StubMixedAudioRouterBackend(), mic, sys, settings, log);
-        mixed.Initialize();
         var webView = new WebViewService(log, settings, mic);
         var browser = new GeminiBrowserService(webView, settings, log);
-        return (log, settings, window, privacy, mic, sys, tx, mixed, webView, browser);
+        var mixed = new DualAudioMixerService(new StubDualAudioMixerBackend(), mic, sys, browser, settings, log);
+        mixed.Initialize();
+        var recorder = new MeetingRecorderService(new StubMeetingRecorderBackend(), mixed, log, _tempRoot);
+        return (log, settings, window, privacy, mic, sys, tx, mixed, recorder, webView, browser);
     }
 
     [Fact]
@@ -218,6 +238,7 @@ public sealed class ViewModelTests : IDisposable
         using var sys = ctx.SysAudio;
         using var tx = ctx.Transcription;
         using var mixed = ctx.MixedAudio;
+        using var recorder = ctx.Recorder;
         using var wv = ctx.WebView;
         using var br = ctx.Browser;
         var themeService = new StubThemeService();
@@ -245,13 +266,14 @@ public sealed class ViewModelTests : IDisposable
         using var sys = ctx.SysAudio;
         using var tx = ctx.Transcription;
         using var mixed = ctx.MixedAudio;
+        using var recorder = ctx.Recorder;
         using var wv = ctx.WebView;
         using var br = ctx.Browser;
         var themeService = new StubThemeService();
         var dialogService = new StubDialogService(confirmResult: true);
 
         var homeVm = new HomeViewModel(br, ctx.Privacy, ctx.Settings);
-        var geminiVm = new GeminiViewModel(br, mic, sys, tx, mixed, ctx.Settings);
+        var geminiVm = new GeminiViewModel(br, mic, sys, tx, mixed, recorder, ctx.Settings);
         var mainVm = new MainViewModel(
             ctx.Settings,
             window,
@@ -307,6 +329,7 @@ public sealed class ViewModelTests : IDisposable
         using var sys = ctx.SysAudio;
         using var tx = ctx.Transcription;
         using var mixed = ctx.MixedAudio;
+        using var recorder = ctx.Recorder;
         using var wv = ctx.WebView;
         using var br = ctx.Browser;
         var themeService = new StubThemeService();
@@ -320,7 +343,7 @@ public sealed class ViewModelTests : IDisposable
             br,
             log,
             new HomeViewModel(br, ctx.Privacy, ctx.Settings),
-            new GeminiViewModel(br, mic, sys, tx, mixed, ctx.Settings),
+            new GeminiViewModel(br, mic, sys, tx, mixed, recorder, ctx.Settings),
             settingsVm,
             new PrivacyViewModel(ctx.Privacy, window, dialogService),
             new AboutViewModel(log, br));
@@ -405,11 +428,12 @@ public sealed class ViewModelTests : IDisposable
         using var sys = ctx.SysAudio;
         using var tx = ctx.Transcription;
         using var mixed = ctx.MixedAudio;
+        using var recorder = ctx.Recorder;
         using var wv = ctx.WebView;
         using var br = ctx.Browser;
         var themeService = new StubThemeService();
         var dialogService = new StubDialogService(confirmResult: true);
-        var geminiVm = new GeminiViewModel(br, mic, sys, tx, mixed, ctx.Settings);
+        var geminiVm = new GeminiViewModel(br, mic, sys, tx, mixed, recorder, ctx.Settings);
 
         var mainVm = new MainViewModel(
             ctx.Settings,
@@ -425,6 +449,21 @@ public sealed class ViewModelTests : IDisposable
 
         Assert.True(mainVm.IsSidebarVisible);
         Assert.True(geminiVm.IsToolbarVisible);
+
+        // Verify Mute Gemini Voice & MP4 Recorder commands wire properly through GeminiViewModel
+        Assert.False(geminiVm.IsGeminiVoiceMuted);
+        Assert.Equal("Mute Gemini Voice", geminiVm.MuteGeminiVoiceLabel);
+        geminiVm.ToggleMuteGeminiVoiceCommand.Execute(null);
+        Assert.True(geminiVm.IsGeminiVoiceMuted);
+        Assert.Equal("Unmute Gemini", geminiVm.MuteGeminiVoiceLabel);
+
+        Assert.False(geminiVm.IsRecording);
+        geminiVm.ToggleRecordingCommand.Execute(null);
+        Assert.True(geminiVm.IsRecording);
+        Assert.Contains("Meeting_", geminiVm.RecordingStatusText);
+        geminiVm.ToggleRecordingCommand.Execute(null);
+        Assert.False(geminiVm.IsRecording);
+        Assert.True(geminiVm.HasCompletedRecording);
 
         mainVm.ToggleSidebarCommand.Execute(null);
         Assert.False(mainVm.IsSidebarVisible);

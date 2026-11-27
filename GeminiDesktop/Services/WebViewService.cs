@@ -27,6 +27,8 @@ public interface IWebViewService : IDisposable
     bool IsInitialized { get; }
     bool CanGoBack { get; }
     bool CanGoForward { get; }
+    bool IsDocumentPlayingAudio { get; }
+    bool IsBrowserAudioMuted { get; }
     string CurrentUrl { get; }
     string DocumentTitle { get; }
     string UserDataDirectory { get; }
@@ -39,6 +41,8 @@ public interface IWebViewService : IDisposable
     event EventHandler<string>? UnsafeNavigationBlocked;
     event EventHandler<string>? RendererProcessFailed;
     event EventHandler<string>? MicrophonePermissionDenied;
+    event EventHandler<bool>? DocumentPlayingAudioChanged;
+    event EventHandler<bool>? BrowserAudioMutedChanged;
 
     bool IsWebView2RuntimeInstalled(out string? version);
     Task InitializeAsync(IWebView2 control, string initialUrl);
@@ -47,6 +51,7 @@ public interface IWebViewService : IDisposable
     void Stop();
     void GoBack();
     void GoForward();
+    void SetBrowserAudioMuted(bool muted);
     Task ClearCacheAsync();
     Task ResetWorkspaceAsync(string initialUrl);
     Task ResetWorkspaceAsync(IWebView2 control, string initialUrl);
@@ -62,6 +67,7 @@ public sealed class WebViewService : IWebViewService
     private CoreWebView2Environment? _environment;
     private string? _lastValidatedTargetUrl;
     private int _lastHttpStatusCode;
+    private bool _desiredMuted;
     private bool _disposed;
 
     public WebViewService(
@@ -78,6 +84,8 @@ public sealed class WebViewService : IWebViewService
     public bool IsInitialized => _webView?.CoreWebView2 is not null;
     public bool CanGoBack => _webView?.CoreWebView2?.CanGoBack ?? false;
     public bool CanGoForward => _webView?.CoreWebView2?.CanGoForward ?? false;
+    public bool IsDocumentPlayingAudio => _webView?.CoreWebView2?.IsDocumentPlayingAudio ?? false;
+    public bool IsBrowserAudioMuted => _webView?.CoreWebView2?.IsMuted ?? _desiredMuted;
     public string CurrentUrl => _webView?.CoreWebView2?.Source ?? _lastValidatedTargetUrl ?? AppSettings.DefaultGeminiUrl;
     public string DocumentTitle => _webView?.CoreWebView2?.DocumentTitle ?? "Google Gemini";
     public string UserDataDirectory { get; }
@@ -90,6 +98,8 @@ public sealed class WebViewService : IWebViewService
     public event EventHandler<string>? UnsafeNavigationBlocked;
     public event EventHandler<string>? RendererProcessFailed;
     public event EventHandler<string>? MicrophonePermissionDenied;
+    public event EventHandler<bool>? DocumentPlayingAudioChanged;
+    public event EventHandler<bool>? BrowserAudioMutedChanged;
 
     public bool IsWebView2RuntimeInstalled(out string? version)
     {
@@ -195,6 +205,22 @@ public sealed class WebViewService : IWebViewService
         }
     }
 
+    public void SetBrowserAudioMuted(bool muted)
+    {
+        _desiredMuted = muted;
+        var core = _webView?.CoreWebView2;
+        if (core is not null)
+        {
+            core.IsMuted = muted;
+        }
+        else
+        {
+            BrowserAudioMutedChanged?.Invoke(this, muted);
+        }
+
+        _loggingService.Information("WebView2 Gemini audio mute set to {Muted}.", muted);
+    }
+
     public async Task ClearCacheAsync()
     {
         if (_webView?.CoreWebView2?.Profile is null)
@@ -277,6 +303,7 @@ public sealed class WebViewService : IWebViewService
 
     private void AttachEvents(CoreWebView2 core)
     {
+        core.IsMuted = _desiredMuted;
         core.NavigationStarting += OnCoreNavigationStarting;
         core.NavigationCompleted += OnCoreNavigationCompleted;
         core.NewWindowRequested += OnCoreNewWindowRequested;
@@ -285,6 +312,10 @@ public sealed class WebViewService : IWebViewService
         core.ProcessFailed += OnCoreProcessFailed;
         core.PermissionRequested += OnCorePermissionRequested;
         core.WebResourceResponseReceived += OnWebResourceResponseReceived;
+        core.IsDocumentPlayingAudioChanged += OnCoreIsDocumentPlayingAudioChanged;
+        core.IsMutedChanged += OnCoreIsMutedChanged;
+        DocumentPlayingAudioChanged?.Invoke(this, core.IsDocumentPlayingAudio);
+        BrowserAudioMutedChanged?.Invoke(this, core.IsMuted);
     }
 
     private void DetachEvents()
@@ -303,6 +334,8 @@ public sealed class WebViewService : IWebViewService
         core.ProcessFailed -= OnCoreProcessFailed;
         core.PermissionRequested -= OnCorePermissionRequested;
         core.WebResourceResponseReceived -= OnWebResourceResponseReceived;
+        core.IsDocumentPlayingAudioChanged -= OnCoreIsDocumentPlayingAudioChanged;
+        core.IsMutedChanged -= OnCoreIsMutedChanged;
     }
 
     private void OnCoreNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
@@ -406,6 +439,22 @@ public sealed class WebViewService : IWebViewService
 
     private void OnCoreHistoryChanged(object? sender, object e) =>
         HistoryChanged?.Invoke(this, EventArgs.Empty);
+
+    private void OnCoreIsDocumentPlayingAudioChanged(object? sender, object e)
+    {
+        if (_webView?.CoreWebView2 is not null)
+        {
+            DocumentPlayingAudioChanged?.Invoke(this, _webView.CoreWebView2.IsDocumentPlayingAudio);
+        }
+    }
+
+    private void OnCoreIsMutedChanged(object? sender, object e)
+    {
+        if (_webView?.CoreWebView2 is not null)
+        {
+            BrowserAudioMutedChanged?.Invoke(this, _webView.CoreWebView2.IsMuted);
+        }
+    }
 
     private void OnCoreProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e)
     {

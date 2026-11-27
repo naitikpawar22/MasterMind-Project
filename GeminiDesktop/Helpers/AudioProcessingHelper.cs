@@ -951,19 +951,25 @@ public sealed class FloatSampleRingBuffer
 }
 
 /// <summary>
-/// Real-time IWaveProvider mixing synchronized 16 kHz Microphone + System Audio float streams with
-/// independent gain/mute controls, anti-clipping soft peak limiting, and upsampling to the virtual cable's WaveFormat.
+/// Real-time NAudio sample-provider graph mixing synchronized Microphone + System Audio loopback streams
+/// via BufferedWaveProvider -> WdlResamplingSampleProvider -> MonoToStereoSampleProvider -> VolumeSampleProvider -> MixingSampleProvider
+/// at uniform 48 kHz Stereo IEEE Float with anti-clipping limiting and Echo/Feedback Guard support.
 /// </summary>
 public sealed class SynchronizedMixedAudioWaveProvider : NAudio.Wave.IWaveProvider
 {
-    private readonly FloatSampleRingBuffer _micBuffer = new();
-    private readonly FloatSampleRingBuffer _sysBuffer = new();
-    private readonly Action<double>? _onLevelMeasured;
+    private const int MaxSourceBufferedBytes = 16000 * sizeof(float) * 160 / 1000; // 160ms cap at 16kHz float mono
 
-    private float[] _micScratch = new float[1024];
-    private float[] _sysScratch = new float[1024];
-    private float[] _mixScratch = new float[1024];
-    private double _upsamplePhase;
+    private readonly NAudio.Wave.BufferedWaveProvider _micBuffer;
+    private readonly NAudio.Wave.BufferedWaveProvider _sysBuffer;
+    private readonly NAudio.Wave.SampleProviders.VolumeSampleProvider _micVolume;
+    private readonly NAudio.Wave.SampleProviders.VolumeSampleProvider _sysVolume;
+    private readonly NAudio.Wave.SampleProviders.MixingSampleProvider _mixer;
+    private readonly NAudio.Wave.SampleProviders.SampleToWaveProvider _outputWaveProvider;
+    private readonly Action<double>? _onLevelMeasured;
+    private readonly object _mixLock = new();
+
+    private byte[] _micPushBytes = new byte[4096];
+    private byte[] _sysPushBytes = new byte[4096];
     private double _smoothedLevel;
     private long _lastLevelTickMs;
     private bool _lastEmittedZero = true;
@@ -972,59 +978,138 @@ public sealed class SynchronizedMixedAudioWaveProvider : NAudio.Wave.IWaveProvid
     private volatile float _sysGain = 1.0f;
     private volatile bool _micMuted;
     private volatile bool _sysMuted;
+    private volatile bool _echoGuardSuppressed;
 
     public SynchronizedMixedAudioWaveProvider(WaveFormat targetFormat, Action<double>? onLevelMeasured = null)
     {
         ArgumentNullException.ThrowIfNull(targetFormat);
-        WaveFormat = targetFormat;
+
+        var targetRate = targetFormat.SampleRate > 0 ? targetFormat.SampleRate : 48000;
+        var mixerFormat = WaveFormat.CreateIeeeFloatWaveFormat(targetRate, 2);
+        WaveFormat = mixerFormat;
         _onLevelMeasured = onLevelMeasured;
+
+        var srcFormat = WaveFormat.CreateIeeeFloatWaveFormat(AudioProcessingHelper.TargetSpeechSampleRate, 1);
+        _micBuffer = new NAudio.Wave.BufferedWaveProvider(srcFormat)
+        {
+            DiscardOnBufferOverflow = true,
+            ReadFully = true
+        };
+        _sysBuffer = new NAudio.Wave.BufferedWaveProvider(srcFormat)
+        {
+            DiscardOnBufferOverflow = true,
+            ReadFully = true
+        };
+
+        var micSample = new NAudio.Wave.SampleProviders.WaveToSampleProvider(_micBuffer);
+        var micResampled = new NAudio.Wave.SampleProviders.WdlResamplingSampleProvider(micSample, targetRate);
+        var micStereo = new NAudio.Wave.SampleProviders.MonoToStereoSampleProvider(micResampled);
+        _micVolume = new NAudio.Wave.SampleProviders.VolumeSampleProvider(micStereo) { Volume = 1.0f };
+
+        var sysSample = new NAudio.Wave.SampleProviders.WaveToSampleProvider(_sysBuffer);
+        var sysResampled = new NAudio.Wave.SampleProviders.WdlResamplingSampleProvider(sysSample, targetRate);
+        var sysStereo = new NAudio.Wave.SampleProviders.MonoToStereoSampleProvider(sysResampled);
+        _sysVolume = new NAudio.Wave.SampleProviders.VolumeSampleProvider(sysStereo) { Volume = 1.0f };
+
+        _mixer = new NAudio.Wave.SampleProviders.MixingSampleProvider([_micVolume, _sysVolume])
+        {
+            ReadFully = true
+        };
+
+        var limitedSample = new SoftLimitingMeterSampleProvider(_mixer, OnPeakMeasured);
+        _outputWaveProvider = new NAudio.Wave.SampleProviders.SampleToWaveProvider(limitedSample);
     }
 
     public WaveFormat WaveFormat { get; }
 
     public void SetMicrophoneMix(double volumePercent, bool muted)
     {
-        _micGain = (float)Math.Clamp(volumePercent / 100.0, 0.0, 2.0);
+        _micGain = (float)Math.Clamp(volumePercent / 100.0, 0.0, 1.5);
         _micMuted = muted;
+        _micVolume.Volume = muted ? 0f : _micGain;
         if (muted)
         {
-            _micBuffer.Clear();
+            _micBuffer.ClearBuffer();
         }
     }
 
     public void SetSystemAudioMix(double volumePercent, bool muted)
     {
-        _sysGain = (float)Math.Clamp(volumePercent / 100.0, 0.0, 2.0);
+        _sysGain = (float)Math.Clamp(volumePercent / 100.0, 0.0, 1.5);
         _sysMuted = muted;
+        UpdateEffectiveSystemVolume();
         if (muted)
         {
-            _sysBuffer.Clear();
+            _sysBuffer.ClearBuffer();
         }
+    }
+
+    public void SetEchoGuardSuppressed(bool suppressed)
+    {
+        _echoGuardSuppressed = suppressed;
+        UpdateEffectiveSystemVolume();
+        _sysBuffer.ClearBuffer();
     }
 
     public void PushMicrophoneFloat16k(ReadOnlySpan<float> samples)
     {
-        if (!_micMuted)
+        if (_micMuted || samples.IsEmpty)
         {
-            _micBuffer.Write(samples);
+            return;
+        }
+
+        lock (_mixLock)
+        {
+            if (_micBuffer.BufferedBytes > MaxSourceBufferedBytes)
+            {
+                _micBuffer.ClearBuffer();
+            }
+
+            var byteCount = samples.Length * sizeof(float);
+            if (_micPushBytes.Length < byteCount)
+            {
+                _micPushBytes = new byte[byteCount];
+            }
+
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(samples).CopyTo(_micPushBytes);
+            _micBuffer.AddSamples(_micPushBytes, 0, byteCount);
         }
     }
 
     public void PushSystemAudioFloat16k(ReadOnlySpan<float> samples)
     {
-        if (!_sysMuted)
+        if (_sysMuted || _echoGuardSuppressed || samples.IsEmpty)
         {
-            _sysBuffer.Write(samples);
+            return;
+        }
+
+        lock (_mixLock)
+        {
+            if (_sysBuffer.BufferedBytes > MaxSourceBufferedBytes)
+            {
+                _sysBuffer.ClearBuffer();
+            }
+
+            var byteCount = samples.Length * sizeof(float);
+            if (_sysPushBytes.Length < byteCount)
+            {
+                _sysPushBytes = new byte[byteCount];
+            }
+
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(samples).CopyTo(_sysPushBytes);
+            _sysBuffer.AddSamples(_sysPushBytes, 0, byteCount);
         }
     }
 
     public void Reset()
     {
-        _micBuffer.Clear();
-        _sysBuffer.Clear();
-        _upsamplePhase = 0.0;
-        _smoothedLevel = 0.0;
-        _lastEmittedZero = true;
+        lock (_mixLock)
+        {
+            _micBuffer.ClearBuffer();
+            _sysBuffer.ClearBuffer();
+            _smoothedLevel = 0.0;
+            _lastEmittedZero = true;
+        }
     }
 
     public int Read(byte[] buffer, int offset, int count) =>
@@ -1037,99 +1122,14 @@ public sealed class SynchronizedMixedAudioWaveProvider : NAudio.Wave.IWaveProvid
             return 0;
         }
 
-        var channels = Math.Max(1, WaveFormat.Channels);
-        var bytesPerSample = Math.Max(2, WaveFormat.BitsPerSample / 8);
-        var blockAlign = Math.Max(WaveFormat.BlockAlign, channels * bytesPerSample);
-        var outFrames = buffer.Length / blockAlign;
-        if (outFrames <= 0)
-        {
-            buffer.Clear();
-            return buffer.Length;
-        }
-
-        var step = (double)AudioProcessingHelper.TargetSpeechSampleRate / Math.Max(8000, WaveFormat.SampleRate);
-        var neededInSamples = (int)Math.Ceiling((outFrames * step) + _upsamplePhase) + 2;
-
-        if (_micScratch.Length < neededInSamples)
-        {
-            _micScratch = new float[neededInSamples];
-            _sysScratch = new float[neededInSamples];
-            _mixScratch = new float[neededInSamples];
-        }
-
-        var micSpan = _micScratch.AsSpan(0, neededInSamples);
-        var sysSpan = _sysScratch.AsSpan(0, neededInSamples);
-        var mixSpan = _mixScratch.AsSpan(0, neededInSamples);
-
-        // Compute integer 16k samples that advance during these outFrames (1e-9 prevents 960 * 1/3 = 319.9999999 rounding)
-        var totalStepAdvance = _upsamplePhase + (outFrames * step);
-        var consume16k = Math.Min(neededInSamples, (int)Math.Floor(totalStepAdvance + 1e-9));
-        _micBuffer.ReadInto(micSpan[..consume16k]);
-        _sysBuffer.ReadInto(sysSpan[..consume16k]);
-
-        var mGain = _micMuted ? 0f : _micGain;
-        var sGain = _sysMuted ? 0f : _sysGain;
-
-        float peak = 0f;
-        for (var i = 0; i < consume16k; i++)
-        {
-            var raw = (micSpan[i] * mGain) + (sysSpan[i] * sGain);
-            var softLimited = SoftLimitSample(raw);
-            mixSpan[i] = softLimited;
-            var abs = MathF.Abs(softLimited);
-            if (abs > peak)
-            {
-                peak = abs;
-            }
-        }
-
-        for (var i = consume16k; i < neededInSamples; i++)
-        {
-            mixSpan[i] = 0f;
-        }
-
-        var isFloat32 = AudioProcessingHelper.IsIeeeFloatFormat(WaveFormat) && WaveFormat.BitsPerSample == 32;
-        var phase = _upsamplePhase;
-        var maxIdx = Math.Max(0, consume16k - 1);
-
-        for (var f = 0; f < outFrames; f++)
-        {
-            var idx = Math.Clamp((int)Math.Floor(phase), 0, maxIdx);
-            var frac = (float)(phase - idx);
-            var s0 = consume16k > 0 ? mixSpan[idx] : 0f;
-            var s1 = (idx + 1 < consume16k) ? mixSpan[idx + 1] : s0;
-            var sample = consume16k > 0 ? Math.Clamp(s0 + ((s1 - s0) * frac), -0.98f, 0.98f) : 0f;
-
-            var framePos = f * blockAlign;
-            for (var ch = 0; ch < channels; ch++)
-            {
-                var samplePos = framePos + (ch * bytesPerSample);
-                if (isFloat32)
-                {
-                    BinaryPrimitives.WriteSingleLittleEndian(buffer.Slice(samplePos, 4), sample);
-                }
-                else
-                {
-                    var pcm16 = (short)Math.Clamp((int)Math.Round(sample * 32767f), short.MinValue, short.MaxValue);
-                    BinaryPrimitives.WriteInt16LittleEndian(buffer.Slice(samplePos, 2), pcm16);
-                }
-            }
-
-            phase += step;
-        }
-
-        _upsamplePhase = phase - consume16k;
-        if (_upsamplePhase < 0 || _upsamplePhase >= 1.0)
-        {
-            _upsamplePhase = 0.0;
-        }
-
-        EmitLevelIfChanged(peak);
-
-        return outFrames * blockAlign;
+        // Pull synchronized audio through NAudio MixingSampleProvider -> SoftLimiter -> IEEE Float bytes
+        return _outputWaveProvider.Read(buffer);
     }
 
-    private void EmitLevelIfChanged(float peak)
+    private void UpdateEffectiveSystemVolume() =>
+        _sysVolume.Volume = (_sysMuted || _echoGuardSuppressed) ? 0f : _sysGain;
+
+    private void OnPeakMeasured(float peak)
     {
         if (_onLevelMeasured is null)
         {
@@ -1153,18 +1153,46 @@ public sealed class SynchronizedMixedAudioWaveProvider : NAudio.Wave.IWaveProvid
         }
     }
 
-    private static float SoftLimitSample(float x)
+    private sealed class SoftLimitingMeterSampleProvider(
+        NAudio.Wave.ISampleProvider source,
+        Action<float> onPeak) : NAudio.Wave.ISampleProvider
     {
-        if (x is >= -0.85f and <= 0.85f)
+        public WaveFormat WaveFormat => source.WaveFormat;
+
+        public int Read(float[] buffer, int offset, int count) =>
+            Read(buffer.AsSpan(offset, count));
+
+        public int Read(Span<float> buffer)
         {
-            return x;
+            var read = source.Read(buffer);
+            float peak = 0f;
+            for (var i = 0; i < read; i++)
+            {
+                var limited = SoftLimitSample(buffer[i]);
+                buffer[i] = limited;
+                var abs = MathF.Abs(limited);
+                if (abs > peak)
+                {
+                    peak = abs;
+                }
+            }
+
+            onPeak(peak);
+            return read;
         }
 
-        // Smooth knee compression between 0.85 and 0.98 so simultaneous talking + loud call never hard-clips
-        var sign = x < 0f ? -1f : 1f;
-        var excess = MathF.Abs(x) - 0.85f;
-        var compressed = 0.85f + (0.13f * (excess / (excess + 0.13f)));
-        return sign * Math.Clamp(compressed, 0f, 0.98f);
+        private static float SoftLimitSample(float x)
+        {
+            if (x is >= -0.85f and <= 0.85f)
+            {
+                return x;
+            }
+
+            var sign = x < 0f ? -1f : 1f;
+            var excess = MathF.Abs(x) - 0.85f;
+            var compressed = 0.85f + (0.13f * (excess / (excess + 0.13f)));
+            return sign * Math.Clamp(compressed, 0f, 0.98f);
+        }
     }
 }
 
@@ -1182,6 +1210,7 @@ public static class VirtualAudioDriverCatalog
         }
 
         return friendlyName.Contains("CABLE Input", StringComparison.OrdinalIgnoreCase)
+            || friendlyName.Contains("CABLE In 16ch", StringComparison.OrdinalIgnoreCase)
             || friendlyName.Contains("Hi-Fi Cable Input", StringComparison.OrdinalIgnoreCase)
             || friendlyName.Contains("VoiceMeeter Input", StringComparison.OrdinalIgnoreCase)
             || friendlyName.Contains("VoiceMeeter Aux Input", StringComparison.OrdinalIgnoreCase)

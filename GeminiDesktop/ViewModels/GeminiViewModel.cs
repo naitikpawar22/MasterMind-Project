@@ -18,7 +18,8 @@ public sealed class GeminiViewModel : ViewModelBase
     private readonly IMicrophoneService _microphoneService;
     private readonly ISystemAudioService _systemAudioService;
     private readonly ISpeechTranscriptionService _transcriptionService;
-    private readonly IMixedAudioRouterService _mixedAudioService;
+    private readonly IDualAudioMixerService _mixedAudioService;
+    private readonly IMeetingRecorderService _recorderService;
     private readonly ISettingsService _settingsService;
 
     private BrowserState _state;
@@ -26,6 +27,7 @@ public sealed class GeminiViewModel : ViewModelBase
     private SystemAudioState _sysState;
     private TranscriptionState _txState;
     private MixedAudioState _mixedState;
+    private MeetingRecordingState _recordingState;
     private bool _isToolbarVisible = true;
     private bool _isAudioPanelVisible = true;
     private string _microphoneAlertBanner = string.Empty;
@@ -36,7 +38,8 @@ public sealed class GeminiViewModel : ViewModelBase
         IMicrophoneService microphoneService,
         ISystemAudioService systemAudioService,
         ISpeechTranscriptionService transcriptionService,
-        IMixedAudioRouterService mixedAudioService,
+        IDualAudioMixerService mixedAudioService,
+        IMeetingRecorderService recorderService,
         ISettingsService settingsService)
     {
         _browserService = browserService;
@@ -44,6 +47,7 @@ public sealed class GeminiViewModel : ViewModelBase
         _systemAudioService = systemAudioService;
         _transcriptionService = transcriptionService;
         _mixedAudioService = mixedAudioService;
+        _recorderService = recorderService;
         _settingsService = settingsService;
 
         _state = _browserService.State;
@@ -51,6 +55,7 @@ public sealed class GeminiViewModel : ViewModelBase
         _sysState = _systemAudioService.CurrentState;
         _txState = _transcriptionService.CurrentState;
         _mixedState = _mixedAudioService.CurrentState;
+        _recordingState = _recorderService.CurrentState;
         _isAudioPanelVisible = _settingsService.CurrentSettings.IsAudioPanelVisible;
 
         BackCommand = new RelayCommand(() => _browserService.GoBack(), () => CanGoBack);
@@ -88,12 +93,17 @@ public sealed class GeminiViewModel : ViewModelBase
         RefreshSystemAudioCommand = new RelayCommand(() => _systemAudioService.RefreshDevice());
         OpenWindowsSoundSettingsCommand = new RelayCommand(() => _systemAudioService.OpenWindowsSoundSettings());
 
-        // Mixed Audio -> Gemini Virtual Mic commands
+        // Mixed Audio -> Gemini Virtual Mic + WebView Echo Guard / Recorder commands
         ToggleMixedRoutingCommand = new RelayCommand(() => IsMixedRoutingEnabled = !IsMixedRoutingEnabled);
         RefreshMixedDriversCommand = new RelayCommand(() => _mixedAudioService.RefreshDevices());
         ToggleMixedMicMuteCommand = new RelayCommand(() => _mixedAudioService.ToggleMicrophoneMixMute());
         ToggleMixedSysMuteCommand = new RelayCommand(() => _mixedAudioService.ToggleSystemAudioMixMute());
         OpenVirtualAudioDriverPageCommand = new RelayCommand(() => _mixedAudioService.OpenVirtualAudioDriverWebsite());
+        ToggleMuteGeminiVoiceCommand = new RelayCommand(() => _browserService.SetBrowserAudioMuted(!IsGeminiVoiceMuted));
+        ToggleRecordingCommand = new RelayCommand(() => _recorderService.ToggleRecording(), () => !_recordingState.IsStartingOrStopping);
+        StartRecordingCommand = new RelayCommand(() => _recorderService.StartRecording(), () => !IsRecording && !_recordingState.IsStartingOrStopping);
+        StopRecordingCommand = new RelayCommand(() => _recorderService.StopRecording(), () => IsRecording && !_recordingState.IsStartingOrStopping);
+        OpenRecordingsFolderCommand = new RelayCommand(() => _recorderService.OpenRecordingsFolder());
 
         // Dual + Transcription commands
         StartBothAudioCommand = new RelayCommand(() => _transcriptionService.StartAllSources());
@@ -107,6 +117,7 @@ public sealed class GeminiViewModel : ViewModelBase
         _systemAudioService.StateChanged += (_, updated) => RunOnUiThread(() => ApplySystemAudioState(updated));
         _transcriptionService.StateChanged += (_, updated) => RunOnUiThread(() => ApplyTranscriptionState(updated));
         _mixedAudioService.StateChanged += (_, updated) => RunOnUiThread(() => ApplyMixedAudioState(updated));
+        _recorderService.StateChanged += (_, updated) => RunOnUiThread(() => ApplyRecordingState(updated));
     }
 
     public event EventHandler? ReinitializeRequested;
@@ -139,6 +150,11 @@ public sealed class GeminiViewModel : ViewModelBase
     public ICommand ToggleMixedMicMuteCommand { get; }
     public ICommand ToggleMixedSysMuteCommand { get; }
     public ICommand OpenVirtualAudioDriverPageCommand { get; }
+    public ICommand ToggleMuteGeminiVoiceCommand { get; }
+    public RelayCommand ToggleRecordingCommand { get; }
+    public RelayCommand StartRecordingCommand { get; }
+    public RelayCommand StopRecordingCommand { get; }
+    public ICommand OpenRecordingsFolderCommand { get; }
 
     public ICommand StartBothAudioCommand { get; }
     public ICommand StopBothAudioCommand { get; }
@@ -329,7 +345,7 @@ public sealed class GeminiViewModel : ViewModelBase
     public string MixedErrorMessage => _mixedState.ErrorMessage ?? string.Empty;
 
     public string MixedToolbarBadgeText => _mixedState.IsStreaming
-        ? "Mixed → Gemini ON"
+        ? (_mixedState.IsEchoGuardActive ? "Mix ON · Echo Guard" : "Mixed → Gemini ON")
         : (_mixedState.IsDriverInstalled ? "Mixed Feed Off" : "Mixed: Driver Setup");
 
     public string MixedToolbarTooltip => _mixedState.IsStreaming
@@ -337,6 +353,31 @@ public sealed class GeminiViewModel : ViewModelBase
         : (_mixedState.IsDriverInstalled
             ? $"Click to route mixed Microphone + System Audio to '{_mixedState.PairedCaptureMicHint}' for Gemini"
             : _mixedState.DependencyMessage ?? "Install VB-Audio Virtual Cable to feed mixed audio to Gemini");
+
+    // WebView2 Audio Output & Echo/Feedback Guard properties
+    public bool IsEchoGuardActive => _mixedState.IsEchoGuardActive;
+    public bool IsGeminiPlayingAudio => _state.IsDocumentPlayingAudio;
+    public bool IsGeminiVoiceMuted => _state.IsBrowserAudioMuted;
+    public string MuteGeminiVoiceLabel => IsGeminiVoiceMuted ? "Unmute Gemini" : "Mute Gemini Voice";
+    public string MuteGeminiVoiceTooltip => IsGeminiVoiceMuted
+        ? "Gemini TTS voice playback is muted in MyLaptop speakers (text still streams). Click to unmute."
+        : "Mute Gemini spoken voice output in your speakers while keeping text responses visible.";
+
+    // Synchronized Screen + Dual-Audio MP4 Recorder properties
+    public bool IsRecording => _recordingState.IsRecording;
+    public bool IsRecorderBusy => _recordingState.IsStartingOrStopping;
+    public string RecordingElapsedLabel => _recordingState.ElapsedLabel;
+    public string RecordingsDirectory => _recordingState.RecordingsDirectory;
+    public string LastCompletedRecordingPath => _recordingState.LastCompletedFilePath ?? string.Empty;
+    public bool HasCompletedRecording => !string.IsNullOrWhiteSpace(LastCompletedRecordingPath);
+    public string RecordingStatusText => _recordingState.StatusText;
+    public string RecordingErrorMessage => _recordingState.ErrorMessage ?? string.Empty;
+    public string RecordButtonLabel => IsRecording
+        ? $"Stop ({RecordingElapsedLabel})"
+        : (_recordingState.IsStartingOrStopping ? "Saving..." : "Record MP4");
+    public string RecordButtonTooltip => IsRecording
+        ? $"Stop screen + dual-audio MP4 recording ({RecordingElapsedLabel})"
+        : $"Record screen + mixed audio to {RecordingsDirectory}";
 
     // Speech-to-Text properties
     public bool IsLiveTranscriptionEnabled
@@ -444,6 +485,10 @@ public sealed class GeminiViewModel : ViewModelBase
         OnPropertyChanged(nameof(ErrorCode));
         OnPropertyChanged(nameof(IsGoogleSignInFlow));
         OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(IsGeminiPlayingAudio));
+        OnPropertyChanged(nameof(IsGeminiVoiceMuted));
+        OnPropertyChanged(nameof(MuteGeminiVoiceLabel));
+        OnPropertyChanged(nameof(MuteGeminiVoiceTooltip));
 
         BackCommand.RaiseCanExecuteChanged();
         ForwardCommand.RaiseCanExecuteChanged();
@@ -568,8 +613,28 @@ public sealed class GeminiViewModel : ViewModelBase
         OnPropertyChanged(nameof(MixedStatusText));
         OnPropertyChanged(nameof(MixedDependencyMessage));
         OnPropertyChanged(nameof(MixedErrorMessage));
+        OnPropertyChanged(nameof(IsEchoGuardActive));
         OnPropertyChanged(nameof(MixedToolbarBadgeText));
         OnPropertyChanged(nameof(MixedToolbarTooltip));
+    }
+
+    private void ApplyRecordingState(MeetingRecordingState updated)
+    {
+        _recordingState = updated;
+        OnPropertyChanged(nameof(IsRecording));
+        OnPropertyChanged(nameof(IsRecorderBusy));
+        OnPropertyChanged(nameof(RecordingElapsedLabel));
+        OnPropertyChanged(nameof(RecordingsDirectory));
+        OnPropertyChanged(nameof(LastCompletedRecordingPath));
+        OnPropertyChanged(nameof(HasCompletedRecording));
+        OnPropertyChanged(nameof(RecordingStatusText));
+        OnPropertyChanged(nameof(RecordingErrorMessage));
+        OnPropertyChanged(nameof(RecordButtonLabel));
+        OnPropertyChanged(nameof(RecordButtonTooltip));
+
+        ToggleRecordingCommand.RaiseCanExecuteChanged();
+        StartRecordingCommand.RaiseCanExecuteChanged();
+        StopRecordingCommand.RaiseCanExecuteChanged();
     }
 
     private void SyncTranscriptCollection(IReadOnlyList<TranscriptEntry> target)

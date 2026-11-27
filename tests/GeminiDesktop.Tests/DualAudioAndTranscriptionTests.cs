@@ -144,7 +144,7 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
         public void Dispose() { }
     }
 
-    private sealed class FakeMixedAudioRouterBackend : IMixedAudioRouterBackend
+    private sealed class FakeDualAudioMixerBackend : IDualAudioMixerBackend
     {
         public List<VirtualAudioOutputDevice> VirtualOutputs { get; } = [];
         public IWaveProvider? ActiveProvider { get; private set; }
@@ -173,6 +173,90 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
 
         public void EmitTopologyChange() => DevicesTopologyChanged?.Invoke(this, EventArgs.Empty);
         public void Dispose() => _ = RoutingStoppedUnexpectedly;
+    }
+
+    private sealed class FakeBrowserService : IGeminiBrowserService
+    {
+        private BrowserState _state = new();
+
+        public BrowserState State => _state;
+
+        public event EventHandler<BrowserState>? StateChanged;
+        public event EventHandler<string>? MicrophonePermissionBlocked;
+        public event EventHandler<bool>? DocumentPlayingAudioChanged;
+
+        public void EmitDocumentPlayingAudio(bool isPlaying)
+        {
+            _state = new BrowserState
+            {
+                IsInitialized = _state.IsInitialized,
+                CurrentUrl = _state.CurrentUrl,
+                IsDocumentPlayingAudio = isPlaying,
+                IsBrowserAudioMuted = _state.IsBrowserAudioMuted,
+                StatusText = _state.StatusText
+            };
+            StateChanged?.Invoke(this, _state);
+            DocumentPlayingAudioChanged?.Invoke(this, isPlaying);
+        }
+
+        public void SetBrowserAudioMuted(bool muted)
+        {
+            _state = new BrowserState
+            {
+                IsInitialized = _state.IsInitialized,
+                CurrentUrl = _state.CurrentUrl,
+                IsDocumentPlayingAudio = _state.IsDocumentPlayingAudio,
+                IsBrowserAudioMuted = muted,
+                StatusText = _state.StatusText
+            };
+            StateChanged?.Invoke(this, _state);
+        }
+
+        public bool CheckWebView2Availability() => true;
+        public Task InitializeWorkspaceAsync(Microsoft.Web.WebView2.Wpf.IWebView2 control) => Task.CompletedTask;
+        public void NavigateHome() { }
+        public void Reload() { }
+        public void GoBack() { }
+        public void GoForward() { }
+        public Task ClearCacheAsync() => Task.CompletedTask;
+        public Task ResetWorkspaceAsync() => Task.CompletedTask;
+        public Task ResetWorkspaceAsync(Microsoft.Web.WebView2.Wpf.IWebView2 control) => Task.CompletedTask;
+        public void OpenWebView2InstallGuide() { }
+        public void Dispose() => _ = MicrophonePermissionBlocked;
+    }
+
+    private sealed class FakeMeetingRecorderBackend : IMeetingRecorderBackend
+    {
+        public event EventHandler<string>? RecordingCompleted;
+        public event EventHandler<string>? RecordingFailed;
+
+        public string? LastOutputPath { get; private set; }
+        public string? LastMixCaptureHint { get; private set; }
+        public bool LastPreferVirtualCableInput { get; private set; }
+        public bool ThrowOnStart { get; set; }
+
+        public void StartRecording(string outputFilePath, string? preferredMixCaptureHint, bool preferVirtualCableInput)
+        {
+            if (ThrowOnStart)
+            {
+                throw new InvalidOperationException("Encoder unavailable.");
+            }
+
+            LastOutputPath = outputFilePath;
+            LastMixCaptureHint = preferredMixCaptureHint;
+            LastPreferVirtualCableInput = preferVirtualCableInput;
+        }
+
+        public void StopRecording()
+        {
+            if (!string.IsNullOrWhiteSpace(LastOutputPath))
+            {
+                RecordingCompleted?.Invoke(this, LastOutputPath);
+            }
+        }
+
+        public void TriggerFailure(string reason) => RecordingFailed?.Invoke(this, reason);
+        public void Dispose() { }
     }
 
     private sealed class StubSpeechBackend : ISpeechTranscriptionBackend
@@ -511,8 +595,9 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
     [Fact]
     public void VirtualAudioDriverCatalog_PreventsSpeakerAndCaptureFeedbackLoops()
     {
-        // Only isolated virtual cable playback endpoints may receive mixed output
+        // Only isolated virtual cable playback endpoints may receive mixed output (and remain excluded from SystemAudioService loopback)
         Assert.True(VirtualAudioDriverCatalog.IsVirtualAudioRenderSink("CABLE Input (VB-Audio Virtual Cable)"));
+        Assert.True(VirtualAudioDriverCatalog.IsVirtualAudioRenderSink("CABLE In 16ch (VB-Audio Virtual Cable)"));
         Assert.True(VirtualAudioDriverCatalog.IsVirtualAudioRenderSink("VoiceMeeter Input (VB-Audio VoiceMeeter VAIO)"));
         Assert.False(VirtualAudioDriverCatalog.IsVirtualAudioRenderSink("Speakers (Realtek(R) Audio)"));
         Assert.False(VirtualAudioDriverCatalog.IsVirtualAudioRenderSink("Headphones (Buds Pro3)"));
@@ -527,7 +612,7 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
     }
 
     [Fact]
-    public void SynchronizedMixedAudioWaveProvider_MixesBothStreamsWithIndependentVolumesAndNoClipping()
+    public void SynchronizedMixedAudioWaveProvider_MixesBothStreamsWithIndependentVolumesEchoGuardAndNoClipping()
     {
         double latestLevel = 0;
         var provider = new SynchronizedMixedAudioWaveProvider(
@@ -561,7 +646,7 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
         Assert.InRange(maxOutSample, 0.85f, 0.985f);
         Assert.True(latestLevel > 0.5);
 
-        // Muting Mic mix passes ONLY System Audio cleanly
+        // Muting Mic mix passes ONLY System Audio cleanly (150% gain clamp check included via 0-150 range)
         provider.SetMicrophoneMix(100, muted: true);
         provider.SetSystemAudioMix(50, muted: false);
         provider.PushMicrophoneFloat16k(micFrames);
@@ -577,22 +662,34 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
         }
 
         Assert.InRange(maxMutedMicSample, 0.35f, 0.45f);
+
+        // Echo Guard suppresses ONLY System Audio while keeping Physical Microphone active
+        provider.SetMicrophoneMix(100, muted: false);
+        provider.SetSystemAudioMix(100, muted: false);
+        provider.SetEchoGuardSuppressed(true);
+        provider.PushMicrophoneFloat16k(Enumerable.Repeat(0.25f, 320).ToArray());
+        provider.PushSystemAudioFloat16k(Enumerable.Repeat(0.25f, 320).ToArray());
+        read = provider.Read(outBytes, 0, outBytes.Length);
+        Assert.Equal(outBytes.Length, read);
+        var micOnlySample = BinaryPrimitives.ReadSingleLittleEndian(outBytes.AsSpan(400, 4));
+        Assert.InRange(micOnlySample, 0.20f, 0.30f);
     }
 
     [Fact]
-    public void MixedAudioRouterService_HandlesMissingDriverHonestlyAndRoutesWhenVirtualCableInstalled()
+    public void DualAudioMixerService_HandlesMissingDriverRoutesVirtualCableAndActivates400msEchoGuard()
     {
         using var log = new LoggingService(_tempRoot);
         var settings = new SettingsService(log, _tempRoot, allowRegistryStartupChanges: false);
         var micBackend = new FakeMicBackend();
         var sysBackend = new FakeSystemAudioBackend();
-        var mixedBackend = new FakeMixedAudioRouterBackend();
+        var mixedBackend = new FakeDualAudioMixerBackend();
+        var browser = new FakeBrowserService();
         var txBackend = new StubSpeechBackend();
 
         using var micService = new MicrophoneService(micBackend, settings, log);
         using var sysService = new SystemAudioService(sysBackend, settings, log);
         using var txService = new SpeechTranscriptionService(txBackend, micService, sysService, settings, log);
-        using var mixedService = new MixedAudioRouterService(mixedBackend, micService, sysService, settings, log);
+        using var mixedService = new DualAudioMixerService(mixedBackend, micService, sysService, browser, settings, log);
 
         micService.Initialize();
         sysService.Initialize();
@@ -608,13 +705,25 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
         Assert.False(mixedService.CurrentState.IsStreaming);
         Assert.Contains("VB-Audio Virtual Cable", mixedService.CurrentState.ErrorMessage);
 
+        // Verify volume clamping is strictly 0..150%, then restore 100% for unity-gain mix assertion
+        mixedService.SetMicrophoneMixVolume(200);
+        Assert.Equal(150, mixedService.CurrentState.MicrophoneVolumePercent);
+        mixedService.SetMicrophoneMixVolume(100);
+        Assert.Equal(100, mixedService.CurrentState.MicrophoneVolumePercent);
+
         // Step 2: Simulate signed VB-Audio Virtual Cable installed -> starts routing cleanly without breaking transcription
         using var routingStartedGate = new ManualResetEventSlim(false);
+        using var echoGuardReleasedGate = new ManualResetEventSlim(false);
         mixedService.StateChanged += (_, s) =>
         {
             if (s.IsStreaming)
             {
                 routingStartedGate.Set();
+            }
+
+            if (s.IsStreaming && !s.IsEchoGuardActive && routingStartedGate.IsSet)
+            {
+                echoGuardReleasedGate.Set();
             }
         };
         mixedBackend.VirtualOutputs.Add(new VirtualAudioOutputDevice(
@@ -629,7 +738,7 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
         Assert.Equal("vbcable-in", mixedBackend.RoutedDeviceId);
         Assert.NotNull(mixedBackend.ActiveProvider);
 
-        // Step 3: Push simultaneous Mic + System float audio and verify mixed wave provider delivers combined audio
+        // Step 3: Push simultaneous Mic + System float audio and verify mixed wave provider delivers combined audio (~0.50f)
         var micFloat = Enumerable.Repeat(0.25f, 320).ToArray();
         var sysFloat = Enumerable.Repeat(0.25f, 320).ToArray();
         micBackend.PushFloat(micFloat);
@@ -641,9 +750,70 @@ public sealed class DualAudioAndTranscriptionTests : IDisposable
         var firstMixedSample = BinaryPrimitives.ReadSingleLittleEndian(buf.AsSpan(400, 4));
         Assert.InRange(firstMixedSample, 0.45f, 0.55f);
 
+        // Step 4: Trigger Echo Guard when Gemini speaks -> System Audio suppressed, Mic continues; unmutes 400ms after silence
+        echoGuardReleasedGate.Reset();
+        browser.EmitDocumentPlayingAudio(true);
+        Assert.True(mixedService.CurrentState.IsEchoGuardActive);
+        micBackend.PushFloat(micFloat);
+        sysBackend.PushFloat(sysFloat);
+        Array.Clear(buf, 0, buf.Length);
+        read = mixedBackend.ActiveProvider.Read(buf);
+        Assert.Equal(7680, read);
+        var guardedSample = BinaryPrimitives.ReadSingleLittleEndian(buf.AsSpan(400, 4));
+        Assert.InRange(guardedSample, 0.20f, 0.30f);
+
+        echoGuardReleasedGate.Reset();
+        browser.EmitDocumentPlayingAudio(false);
+        Assert.True(mixedService.CurrentState.IsEchoGuardActive, "Echo Guard should hold briefly during the 400ms tail delay.");
+        Assert.True(echoGuardReleasedGate.Wait(TimeSpan.FromSeconds(3)), "Echo Guard did not release 400ms after Gemini stopped speaking.");
+        Assert.False(mixedService.CurrentState.IsEchoGuardActive);
+
         // Right-side transcription continues unaffected concurrently
         Assert.Contains(AudioSourceKind.Microphone, txBackend.RunningSources);
         Assert.Contains(AudioSourceKind.SystemAudio, txBackend.RunningSources);
+    }
+
+    [Fact]
+    public void MeetingRecorderService_SavesTimestampedMp4InDocumentsMeetingRecordings()
+    {
+        using var log = new LoggingService(_tempRoot);
+        var settings = new SettingsService(log, _tempRoot, allowRegistryStartupChanges: false);
+        var micBackend = new FakeMicBackend();
+        var sysBackend = new FakeSystemAudioBackend();
+        var mixedBackend = new FakeDualAudioMixerBackend();
+        mixedBackend.VirtualOutputs.Add(new VirtualAudioOutputDevice(
+            "vbcable-in",
+            "CABLE Input (VB-Audio Virtual Cable)",
+            "CABLE Output (VB-Audio Virtual Cable)"));
+        var browser = new FakeBrowserService();
+        var recorderBackend = new FakeMeetingRecorderBackend();
+
+        using var micService = new MicrophoneService(micBackend, settings, log);
+        using var sysService = new SystemAudioService(sysBackend, settings, log);
+        using var mixedService = new DualAudioMixerService(mixedBackend, micService, sysService, browser, settings, log);
+        micService.Initialize();
+        sysService.Initialize();
+        mixedService.Initialize();
+        mixedService.SetEnabled(true);
+
+        var recordingsDir = Path.Combine(_tempRoot, "MeetingRecordings");
+        using var recorderService = new MeetingRecorderService(recorderBackend, mixedService, log, recordingsDir);
+
+        recorderService.StartRecording();
+        Assert.True(recorderService.CurrentState.IsRecording);
+        Assert.True(recorderBackend.LastPreferVirtualCableInput);
+        Assert.StartsWith(recordingsDir, recorderBackend.LastOutputPath);
+        Assert.Matches(@"Meeting_\d{8}_\d{6}\.mp4$", Path.GetFileName(recorderBackend.LastOutputPath!));
+
+        recorderService.StopRecording();
+        Assert.False(recorderService.CurrentState.IsRecording);
+        Assert.Equal(recorderBackend.LastOutputPath, recorderService.CurrentState.LastCompletedFilePath);
+
+        // Failure path leaves clean non-crashing error state
+        recorderBackend.ThrowOnStart = true;
+        recorderService.StartRecording();
+        Assert.False(recorderService.CurrentState.IsRecording);
+        Assert.Contains("Encoder unavailable", recorderService.CurrentState.ErrorMessage);
     }
 
     public void Dispose()

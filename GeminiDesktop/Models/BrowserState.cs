@@ -35,5 +35,9 @@ public sealed class BrowserState
 
     public bool IsGoogleSignInFlow { get; init; }
 
+    public bool IsDocumentPlayingAudio { get; init; }
+
+    public bool IsBrowserAudioMuted { get; init; }
+
     public string StatusText { get; init; } = "Ready";
 }

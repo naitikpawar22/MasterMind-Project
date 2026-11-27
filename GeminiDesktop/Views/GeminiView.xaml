@@ -238,7 +238,7 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Mixed Audio -> Gemini Indicator Pill -->
+                    <!-- Mixed Audio -> Gemini Indicator Pill (with Echo Guard notice) -->
                     <Button Command="{Binding ToggleMixedRoutingCommand}"
                             ToolTip="{Binding MixedToolbarTooltip}"
                             Margin="0,0,6,0">
@@ -257,6 +257,10 @@
                                                     <Setter Property="Background" Value="{DynamicResource StatusSuccessBgBrush}" />
                                                     <Setter Property="BorderBrush" Value="{DynamicResource StatusSuccessBorderBrush}" />
                                                 </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsEchoGuardActive}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource StatusWarningBgBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource StatusWarningBorderBrush}" />
+                                                </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsVirtualDriverInstalled}" Value="False">
                                                     <Setter Property="Background" Value="{DynamicResource StatusWarningBgBrush}" />
                                                     <Setter Property="BorderBrush" Value="{DynamicResource StatusWarningBorderBrush}" />
@@ -272,6 +276,9 @@
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsMixedAudioStreaming}" Value="True">
                                                             <Setter Property="Fill" Value="{DynamicResource StatusSuccessFgBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsEchoGuardActive}" Value="True">
+                                                            <Setter Property="Fill" Value="{DynamicResource StatusWarningFgBrush}" />
                                                         </DataTrigger>
                                                         <DataTrigger Binding="{Binding IsVirtualDriverInstalled}" Value="False">
                                                             <Setter Property="Fill" Value="{DynamicResource StatusWarningFgBrush}" />
@@ -291,8 +298,109 @@
                                                         <DataTrigger Binding="{Binding IsMixedAudioStreaming}" Value="True">
                                                             <Setter Property="Foreground" Value="{DynamicResource StatusSuccessFgBrush}" />
                                                         </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsEchoGuardActive}" Value="True">
+                                                            <Setter Property="Foreground" Value="{DynamicResource StatusWarningFgBrush}" />
+                                                        </DataTrigger>
                                                         <DataTrigger Binding="{Binding IsVirtualDriverInstalled}" Value="False">
                                                             <Setter Property="Foreground" Value="{DynamicResource StatusWarningFgBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
+                    <!-- Mute Gemini Spoken Voice Output (WebView2.IsMuted) -->
+                    <Button Command="{Binding ToggleMuteGeminiVoiceCommand}"
+                            ToolTip="{Binding MuteGeminiVoiceTooltip}"
+                            Margin="0,0,6,0">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Height="30"
+                                        CornerRadius="6"
+                                        BorderThickness="1"
+                                        Padding="8,0">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{DynamicResource SurfaceBackgroundBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtleBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsGeminiVoiceMuted}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource StatusDangerBgBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource StatusDangerBorderBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <TextBlock Text="{Binding MuteGeminiVoiceLabel}"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               VerticalAlignment="Center">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsGeminiVoiceMuted}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource StatusDangerFgBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
+                    <!-- Screen + Dual-Audio MP4 Recorder Toggle Pill -->
+                    <Button Command="{Binding ToggleRecordingCommand}"
+                            ToolTip="{Binding RecordButtonTooltip}"
+                            Margin="0,0,6,0">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Height="30"
+                                        CornerRadius="6"
+                                        BorderThickness="1"
+                                        Padding="8,0">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{DynamicResource SurfaceBackgroundBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtleBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsRecording}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource StatusDangerBgBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource StatusDangerBorderBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Ellipse Width="7" Height="7" Margin="0,0,5,0">
+                                            <Ellipse.Style>
+                                                <Style TargetType="Ellipse">
+                                                    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsRecording}" Value="True">
+                                                            <Setter Property="Fill" Value="{DynamicResource StatusDangerFgBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Ellipse.Style>
+                                        </Ellipse>
+                                        <TextBlock Text="{Binding RecordButtonLabel}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsRecording}" Value="True">
+                                                            <Setter Property="Foreground" Value="{DynamicResource StatusDangerFgBrush}" />
                                                         </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
@@ -904,7 +1012,19 @@
                                                   FontWeight="SemiBold"
                                                   VerticalAlignment="Center"
                                                   Margin="0,0,6,0" />
-                                        <TextBlock Grid.Column="1"
+                                        <Border Grid.Column="1"
+                                                Background="{DynamicResource StatusWarningBgBrush}"
+                                                BorderBrush="{DynamicResource StatusWarningBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="4"
+                                                Padding="5,1"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Center"
+                                                Margin="0,0,6,0"
+                                                Visibility="{Binding IsEchoGuardActive, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="Echo Guard" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource StatusWarningFgBrush}" />
+                                        </Border>
+                                        <TextBlock Grid.Column="2"
                                                    Text="{Binding MixedOutputLevelPercent, StringFormat=Mix {0}%}"
                                                    FontSize="11"
                                                    Foreground="{DynamicResource TextMutedBrush}"
@@ -972,21 +1092,49 @@
                                     </Grid>
 
                                     <Grid Margin="0,0,0,4">
-                                        <TextBlock Text="Mic Mix Volume" FontSize="11" />
+                                        <TextBlock Text="My Microphone" FontSize="11" />
                                         <TextBlock Text="{Binding MixedMicrophoneVolumePercent, StringFormat={}{0}%}" FontSize="11" HorizontalAlignment="Right" />
                                     </Grid>
-                                    <Slider Minimum="0" Maximum="200" Value="{Binding MixedMicrophoneVolumePercent, Mode=TwoWay}" Margin="0,0,0,6" />
+                                    <Slider Minimum="0" Maximum="150" Value="{Binding MixedMicrophoneVolumePercent, Mode=TwoWay}" Margin="0,0,0,6" />
 
                                     <Grid Margin="0,0,0,4">
-                                        <TextBlock Text="System Audio Mix Volume" FontSize="11" />
+                                        <TextBlock Text="System Audio (Teams)" FontSize="11" />
                                         <TextBlock Text="{Binding MixedSystemAudioVolumePercent, StringFormat={}{0}%}" FontSize="11" HorizontalAlignment="Right" />
                                     </Grid>
-                                    <Slider Minimum="0" Maximum="200" Value="{Binding MixedSystemAudioVolumePercent, Mode=TwoWay}" Margin="0,0,0,6" />
+                                    <Slider Minimum="0" Maximum="150" Value="{Binding MixedSystemAudioVolumePercent, Mode=TwoWay}" Margin="0,0,0,6" />
 
-                                    <StackPanel Orientation="Horizontal">
-                                        <Button Content="{Binding MixedMicMuteButtonText}" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding ToggleMixedMicMuteCommand}" Padding="7,2" FontSize="10.5" Margin="0,0,4,0" />
-                                        <Button Content="{Binding MixedSysMuteButtonText}" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding ToggleMixedSysMuteCommand}" Padding="7,2" FontSize="10.5" />
-                                    </StackPanel>
+                                    <WrapPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                        <Button Content="{Binding MixedMicMuteButtonText}" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding ToggleMixedMicMuteCommand}" Padding="7,2" FontSize="10.5" Margin="0,0,4,4" />
+                                        <Button Content="{Binding MixedSysMuteButtonText}" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding ToggleMixedSysMuteCommand}" Padding="7,2" FontSize="10.5" Margin="0,0,4,4" />
+                                        <Button Content="{Binding MuteGeminiVoiceLabel}" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding ToggleMuteGeminiVoiceCommand}" Padding="7,2" FontSize="10.5" Margin="0,0,0,4" />
+                                    </WrapPanel>
+
+                                    <Grid Margin="0,2,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button Grid.Column="0"
+                                                Content="{Binding RecordButtonLabel}"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                Command="{Binding ToggleRecordingCommand}"
+                                                ToolTip="{Binding RecordButtonTooltip}"
+                                                Padding="8,3"
+                                                FontSize="10.5"
+                                                Margin="0,0,4,0" />
+                                        <Button Grid.Column="1"
+                                                Content="Recordings"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                Command="{Binding OpenRecordingsFolderCommand}"
+                                                ToolTip="Open Documents\MeetingRecordings"
+                                                Padding="8,3"
+                                                FontSize="10.5" />
+                                    </Grid>
+                                    <TextBlock Text="{Binding RecordingStatusText}"
+                                               FontSize="10.5"
+                                               Foreground="{DynamicResource TextMutedBrush}"
+                                               TextTrimming="CharacterEllipsis"
+                                               Margin="0,4,0,0" />
                                 </StackPanel>
                             </Expander>
                         </Border>

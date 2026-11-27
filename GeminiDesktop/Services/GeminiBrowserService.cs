@@ -17,6 +17,7 @@ public interface IGeminiBrowserService : IDisposable
 
     event EventHandler<BrowserState>? StateChanged;
     event EventHandler<string>? MicrophonePermissionBlocked;
+    event EventHandler<bool>? DocumentPlayingAudioChanged;
 
     bool CheckWebView2Availability();
     Task InitializeWorkspaceAsync(IWebView2 control);
@@ -24,6 +25,7 @@ public interface IGeminiBrowserService : IDisposable
     void Reload();
     void GoBack();
     void GoForward();
+    void SetBrowserAudioMuted(bool muted);
     Task ClearCacheAsync();
     Task ResetWorkspaceAsync();
     Task ResetWorkspaceAsync(IWebView2 control);
@@ -56,6 +58,8 @@ public sealed class GeminiBrowserService : IGeminiBrowserService
         _webViewService.UnsafeNavigationBlocked += OnUnsafeNavigationBlocked;
         _webViewService.RendererProcessFailed += OnRendererProcessFailed;
         _webViewService.MicrophonePermissionDenied += OnMicrophonePermissionDenied;
+        _webViewService.DocumentPlayingAudioChanged += OnDocumentPlayingAudioChanged;
+        _webViewService.BrowserAudioMutedChanged += OnBrowserAudioMutedChanged;
 
         NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
 
@@ -73,6 +77,7 @@ public sealed class GeminiBrowserService : IGeminiBrowserService
 
     public event EventHandler<BrowserState>? StateChanged;
     public event EventHandler<string>? MicrophonePermissionBlocked;
+    public event EventHandler<bool>? DocumentPlayingAudioChanged;
 
     public bool CheckWebView2Availability()
     {
@@ -194,6 +199,8 @@ public sealed class GeminiBrowserService : IGeminiBrowserService
     public void GoBack() => _webViewService.GoBack();
 
     public void GoForward() => _webViewService.GoForward();
+
+    public void SetBrowserAudioMuted(bool muted) => _webViewService.SetBrowserAudioMuted(muted);
 
     public async Task ClearCacheAsync()
     {
@@ -438,6 +445,17 @@ public sealed class GeminiBrowserService : IGeminiBrowserService
         MicrophonePermissionBlocked?.Invoke(this, reason);
     }
 
+    private void OnDocumentPlayingAudioChanged(object? sender, bool isPlaying)
+    {
+        UpdateState(s => CopyWith(s, isDocumentPlayingAudio: isPlaying));
+        DocumentPlayingAudioChanged?.Invoke(this, isPlaying);
+    }
+
+    private void OnBrowserAudioMutedChanged(object? sender, bool isMuted)
+    {
+        UpdateState(s => CopyWith(s, isBrowserAudioMuted: isMuted));
+    }
+
     private void OnRendererProcessFailed(object? sender, string reason)
     {
         UpdateState(s => CopyWith(s,
@@ -491,6 +509,8 @@ public sealed class GeminiBrowserService : IGeminiBrowserService
         string? errorMessage = null,
         string? errorCode = null,
         bool? isGoogleSignInFlow = null,
+        bool? isDocumentPlayingAudio = null,
+        bool? isBrowserAudioMuted = null,
         string? statusText = null)
     {
         return new BrowserState
@@ -510,6 +530,8 @@ public sealed class GeminiBrowserService : IGeminiBrowserService
             ErrorMessage = hasError == false ? null : (errorMessage ?? source.ErrorMessage),
             ErrorCode = hasError == false ? null : (errorCode ?? source.ErrorCode),
             IsGoogleSignInFlow = isGoogleSignInFlow ?? source.IsGoogleSignInFlow,
+            IsDocumentPlayingAudio = isDocumentPlayingAudio ?? source.IsDocumentPlayingAudio,
+            IsBrowserAudioMuted = isBrowserAudioMuted ?? source.IsBrowserAudioMuted,
             StatusText = statusText ?? source.StatusText
         };
     }
@@ -532,5 +554,7 @@ public sealed class GeminiBrowserService : IGeminiBrowserService
         _webViewService.UnsafeNavigationBlocked -= OnUnsafeNavigationBlocked;
         _webViewService.RendererProcessFailed -= OnRendererProcessFailed;
         _webViewService.MicrophonePermissionDenied -= OnMicrophonePermissionDenied;
+        _webViewService.DocumentPlayingAudioChanged -= OnDocumentPlayingAudioChanged;
+        _webViewService.BrowserAudioMutedChanged -= OnBrowserAudioMutedChanged;
     }
 }

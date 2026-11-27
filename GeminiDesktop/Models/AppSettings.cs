@@ -111,8 +111,8 @@ public sealed class AppSettings
         IsAudioPanelVisible = IsAudioPanelVisible,
         EnableGeminiMixedAudioRouting = EnableGeminiMixedAudioRouting,
         PreferredMixedOutputDeviceId = PreferredMixedOutputDeviceId,
-        MixedMicrophoneVolumePercent = Math.Clamp(MixedMicrophoneVolumePercent, 0, 200),
-        MixedSystemAudioVolumePercent = Math.Clamp(MixedSystemAudioVolumePercent, 0, 200)
+        MixedMicrophoneVolumePercent = Math.Clamp(MixedMicrophoneVolumePercent, 0, 150),
+        MixedSystemAudioVolumePercent = Math.Clamp(MixedSystemAudioVolumePercent, 0, 150)
     };
 
     public static double ClampOpacity(double opacity) =>

@@ -136,6 +136,8 @@ public sealed class MixedAudioState
 
     public bool IsSystemAudioMixMuted { get; init; }
 
+    public bool IsEchoGuardActive { get; init; }
+
     public double MixedOutputLevel { get; init; }
 
     public int MixedOutputLevelPercent => (int)Math.Round(Math.Clamp(MixedOutputLevel, 0.0, 1.0) * 100.0);
@@ -143,6 +145,30 @@ public sealed class MixedAudioState
     public string StatusText { get; init; } = "Mixed Gemini feed off";
 
     public string? DependencyMessage { get; init; }
+
+    public string? ErrorMessage { get; init; }
+}
+
+/// <summary>
+/// Live snapshot of synchronized screen + dual audio recording to MP4.
+/// </summary>
+public sealed class MeetingRecordingState
+{
+    public bool IsRecording { get; init; }
+
+    public bool IsStartingOrStopping { get; init; }
+
+    public TimeSpan Elapsed { get; init; }
+
+    public string ElapsedLabel => Elapsed.ToString(@"hh\:mm\:ss");
+
+    public string RecordingsDirectory { get; init; } = string.Empty;
+
+    public string? CurrentFilePath { get; init; }
+
+    public string? LastCompletedFilePath { get; init; }
+
+    public string StatusText { get; init; } = "Recorder ready";
 
     public string? ErrorMessage { get; init; }
 }

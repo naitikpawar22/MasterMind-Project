@@ -316,11 +316,40 @@
                                   Content="Send Mixed Audio (Mic + Meeting Audio) to Gemini Mic"
                                   FontWeight="SemiBold"
                                   Margin="0,0,10,0" />
+                        <Border Background="{DynamicResource StatusWarningBgBrush}"
+                                BorderBrush="{DynamicResource StatusWarningBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Padding="6,2"
+                                Margin="0,0,8,0"
+                                Visibility="{Binding IsEchoGuardActive, Converter={StaticResource BoolToVis}}"
+                                ToolTip="Echo/Feedback Guard active: System Audio into CABLE Input is paused while Gemini speaks, then resumes 400ms after silence.">
+                            <TextBlock Text="Echo Guard Active"
+                                       FontSize="11"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource StatusWarningFgBrush}" />
+                        </Border>
                         <TextBlock Text="{Binding MixedStatusText}"
                                    Style="{StaticResource MutedCaptionTextStyle}"
                                    VerticalAlignment="Center" />
                     </StackPanel>
                     <StackPanel Grid.Column="2" Orientation="Horizontal">
+                        <Button Command="{Binding ToggleMuteGeminiVoiceCommand}"
+                                Content="{Binding MuteGeminiVoiceLabel}"
+                                ToolTip="{Binding MuteGeminiVoiceTooltip}"
+                                Padding="10,4"
+                                Margin="0,0,6,0">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsGeminiVoiceMuted}" Value="True">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource StatusDangerBorderBrush}" />
+                                            <Setter Property="Foreground" Value="{DynamicResource StatusDangerFgBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
                         <Button Content="Refresh Drivers"
                                 Style="{StaticResource SecondaryButtonStyle}"
                                 Command="{Binding RefreshMixedDriversCommand}"
@@ -368,7 +397,7 @@
                 </Border>
 
                 <!-- Independent Mix Volume Controls & Virtual Output Selector -->
-                <Grid>
+                <Grid Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="1.2*" />
                         <ColumnDefinition Width="14" />
@@ -397,19 +426,19 @@
 
                     <StackPanel Grid.Column="2">
                         <Grid Margin="0,0,0,2">
-                            <TextBlock Text="Mic Mix Volume" FontSize="12" FontWeight="SemiBold" />
+                            <TextBlock Text="My Microphone" FontSize="12" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding MixedMicrophoneVolumePercent, StringFormat={}{0}%}" FontSize="12" HorizontalAlignment="Right" Foreground="{DynamicResource StatusSuccessFgBrush}" />
                         </Grid>
-                        <Slider Minimum="0" Maximum="200" TickFrequency="10" Value="{Binding MixedMicrophoneVolumePercent, Mode=TwoWay}" Margin="0,2,0,4" />
+                        <Slider Minimum="0" Maximum="150" TickFrequency="10" Value="{Binding MixedMicrophoneVolumePercent, Mode=TwoWay}" Margin="0,2,0,4" />
                         <Button Content="{Binding MixedMicMuteButtonText}" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding ToggleMixedMicMuteCommand}" Padding="8,2" FontSize="11.5" HorizontalAlignment="Left" />
                     </StackPanel>
 
                     <StackPanel Grid.Column="4">
                         <Grid Margin="0,0,0,2">
-                            <TextBlock Text="Meeting / System Volume" FontSize="12" FontWeight="SemiBold" />
+                            <TextBlock Text="System Audio (Teams)" FontSize="12" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding MixedSystemAudioVolumePercent, StringFormat={}{0}%}" FontSize="12" HorizontalAlignment="Right" Foreground="{DynamicResource AccentTextBrush}" />
                         </Grid>
-                        <Slider Minimum="0" Maximum="200" TickFrequency="10" Value="{Binding MixedSystemAudioVolumePercent, Mode=TwoWay}" Margin="0,2,0,4" />
+                        <Slider Minimum="0" Maximum="150" TickFrequency="10" Value="{Binding MixedSystemAudioVolumePercent, Mode=TwoWay}" Margin="0,2,0,4" />
                         <Button Content="{Binding MixedSysMuteButtonText}" Style="{StaticResource SecondaryButtonStyle}" Command="{Binding ToggleMixedSysMuteCommand}" Padding="8,2" FontSize="11.5" HorizontalAlignment="Left" />
                     </StackPanel>
 
@@ -428,6 +457,59 @@
                                      BorderThickness="1" />
                     </StackPanel>
                 </Grid>
+
+                <!-- Synchronized Screen + Dual-Audio MP4 Recording Strip -->
+                <Border Background="{DynamicResource SurfaceSecondaryBrush}"
+                        BorderBrush="{DynamicResource BorderSubtleBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Padding="10,7">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
+                            <TextBlock Text="Meeting MP4 Recorder" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <TextBlock Text="{Binding RecordingStatusText}"
+                                       FontSize="11.5"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding RecordingErrorMessage}"
+                                   FontSize="11.5"
+                                   Foreground="{DynamicResource StatusWarningFgBrush}"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   Margin="0,0,10,0"
+                                   Visibility="{Binding RecordingErrorMessage, Converter={StaticResource StringToVis}}" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal">
+                            <Button Command="{Binding ToggleRecordingCommand}"
+                                    ToolTip="{Binding RecordButtonTooltip}"
+                                    Padding="12,4"
+                                    Margin="0,0,6,0">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+                                        <Setter Property="Content" Value="{Binding RecordButtonLabel}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsRecording}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource StatusDangerFgBrush}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource StatusDangerBorderBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                            <Button Content="Open Folder"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Command="{Binding OpenRecordingsFolderCommand}"
+                                    ToolTip="Open Documents\MeetingRecordings"
+                                    Padding="10,4" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
             </StackPanel>
         </Border>
 

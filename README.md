@@ -80,10 +80,11 @@ MasterMind/
 │   │       └── LightTheme.xaml
 │   ├── Services/
 │   │   ├── DialogService.cs
+│   │   ├── DualAudioMixerService.cs
 │   │   ├── GeminiBrowserService.cs
 │   │   ├── LoggingService.cs
+│   │   ├── MeetingRecorderService.cs
 │   │   ├── MicrophoneService.cs
-│   │   ├── MixedAudioRouterService.cs
 │   │   ├── PrivacyService.cs
 │   │   ├── SettingsService.cs
 │   │   ├── SpeechTranscriptionService.cs
