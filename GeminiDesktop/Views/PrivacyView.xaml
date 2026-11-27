@@ -1,0 +1,196 @@
+<UserControl x:Class="GeminiDesktop.Views.PrivacyView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="32,28,32,32" MaxWidth="860" HorizontalAlignment="Left">
+
+            <TextBlock Text="Privacy &amp; Window Management" Style="{StaticResource PageTitleTextStyle}" />
+            <TextBlock Text="Transparent desktop privacy settings using documented Windows Display Affinity APIs alongside multi-monitor window controls."
+                       Style="{StaticResource PageSubtitleTextStyle}"
+                       Margin="0,6,0,20" />
+
+            <!-- Active Privacy Status Indicator Banner -->
+            <Border CornerRadius="8" BorderThickness="1" Padding="16" Margin="0,0,0,18">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="{DynamicResource SurfaceBackgroundBrush}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtleBrush}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsCaptureExclusionActive}" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource StatusSuccessBgBrush}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource StatusSuccessBorderBrush}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                        <TextBlock Text="CURRENT PRIVACY &amp; SHARING STATUS"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextMutedBrush}" />
+                        <TextBlock Text="{Binding StatusSummary}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Margin="0,4,0,6">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsCaptureExclusionActive}" Value="True">
+                                            <Setter Property="Foreground" Value="{DynamicResource StatusSuccessFgBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <TextBlock Text="{Binding SharingExplanation}" Style="{StaticResource BodyTextStyle}" />
+                    </StackPanel>
+
+                    <Button Grid.Column="1"
+                            Content="Refresh Status"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Command="{Binding RefreshStatusCommand}"
+                            VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+
+            <!-- Error Banner if SetWindowDisplayAffinity Failed or Unsupported -->
+            <Border Style="{StaticResource DangerBannerStyle}"
+                    Visibility="{Binding LastErrorMessage, Converter={StaticResource StringToVis}}"
+                    Margin="0,0,0,18">
+                <TextBlock Text="{Binding LastErrorMessage}"
+                           Foreground="{DynamicResource StatusDangerFgBrush}"
+                           TextWrapping="Wrap" />
+            </Border>
+
+            <!-- Capture Exclusion Controls -->
+            <Border Style="{StaticResource SectionCardStyle}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="Privacy Mode (Documented Windows Screen-Capture Exclusion)" Style="{StaticResource CardTitleTextStyle}" Margin="0,0,0,10" />
+
+                    <CheckBox Style="{StaticResource ModernToggleSwitchStyle}"
+                              IsChecked="{Binding IsCaptureExclusionEnabled}"
+                              IsEnabled="{Binding IsCaptureExclusionSupported}"
+                              Content="Enable Privacy Mode (WDA_EXCLUDEFROMCAPTURE · password required to switch OFF)"
+                              Margin="0,0,0,14" />
+
+                    <Grid Margin="0,4,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="190" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Operating System:" FontWeight="SemiBold" FontSize="12.5" Margin="0,0,0,6" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding OsVersionDescription}" Style="{StaticResource BodyTextStyle}" Margin="0,0,0,6" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Applied Win32 Affinity:" FontWeight="SemiBold" FontSize="12.5" Margin="0,0,0,6" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding AppliedAffinityDisplay}" Style="{StaticResource BodyTextStyle}" Margin="0,0,0,6" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Hardware &amp; OS Support:" FontWeight="SemiBold" FontSize="12.5" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding CapabilitySummary}" Style="{StaticResource BodyTextStyle}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Window Management Card -->
+            <Border Style="{StaticResource SectionCardStyle}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="Desktop Window Controls" Style="{StaticResource CardTitleTextStyle}" Margin="0,0,0,10" />
+
+                    <CheckBox Style="{StaticResource ModernToggleSwitchStyle}"
+                              IsChecked="{Binding IsAlwaysOnTop}"
+                              Content="Keep MyLaptop always on top of other windows"
+                              Margin="0,0,0,14" />
+
+                    <TextBlock Text="Window Transparency (Background Visibility)" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,4" />
+                    <TextBlock FontSize="12.5" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8">
+                        <Run Text="Opaque: " />
+                        <Run Text="{Binding WindowOpacityPercent, Mode=OneWay}" FontWeight="SemiBold" />
+                        <Run Text="%  ·  Background visible: " />
+                        <Run Text="{Binding BackgroundVisibilityPercent, Mode=OneWay}" FontWeight="SemiBold" />
+                        <Run Text="%" />
+                    </TextBlock>
+
+                    <Slider Minimum="0.30"
+                            Maximum="1.0"
+                            SmallChange="0.05"
+                            LargeChange="0.10"
+                            TickFrequency="0.05"
+                            Value="{Binding WindowOpacity, Mode=TwoWay}"
+                            Width="360"
+                            HorizontalAlignment="Left"
+                            Margin="0,0,0,10" />
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <Button Content="100% (Solid)" Style="{StaticResource SecondaryButtonStyle}" Padding="10,5" FontSize="12" Command="{Binding SetOpacityPresetCommand}" CommandParameter="100" Margin="0,0,8,0" />
+                        <Button Content="85%" Style="{StaticResource SecondaryButtonStyle}" Padding="10,5" FontSize="12" Command="{Binding SetOpacityPresetCommand}" CommandParameter="85" Margin="0,0,8,0" />
+                        <Button Content="70%" Style="{StaticResource SecondaryButtonStyle}" Padding="10,5" FontSize="12" Command="{Binding SetOpacityPresetCommand}" CommandParameter="70" Margin="0,0,8,0" />
+                        <Button Content="50%" Style="{StaticResource SecondaryButtonStyle}" Padding="10,5" FontSize="12" Command="{Binding SetOpacityPresetCommand}" CommandParameter="50" />
+                    </StackPanel>
+
+                    <TextBlock Text="Standard window placement and display recovery actions:"
+                               Style="{StaticResource MutedCaptionTextStyle}"
+                               Margin="0,0,0,10" />
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Minimize Window"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding MinimizeWindowCommand}"
+                                Margin="0,0,10,0" />
+                        <Button Content="Maximize / Restore"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding ToggleMaximizeRestoreCommand}"
+                                Margin="0,0,10,0" />
+                        <Button Content="Keep Inside Visible Desktop"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding EnsureOnScreenCommand}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Capture Method Compatibility Matrix -->
+            <Border Style="{StaticResource SectionCardStyle}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="Capture Method Compatibility Guide" Style="{StaticResource CardTitleTextStyle}" Margin="0,0,0,10" />
+                    <TextBlock Style="{StaticResource BodyTextStyle}" Margin="0,0,0,8"
+                               Text="Supported (Omitted by DWM when WDA_EXCLUDEFROMCAPTURE is active on Windows 10 2004+ / Windows 11):" FontWeight="SemiBold" />
+                    <TextBlock Style="{StaticResource BodyTextStyle}" Margin="10,0,0,10"
+                               Text="• Windows Snipping Tool (Win+Shift+S) and PrtScn / Desktop Duplication API&#x0a;• GDI BitBlt / Graphics.CopyFromScreen desktop capture&#x0a;• Windows Graphics Capture (WGC) and Xbox Game Bar (Win+G) desktop recording&#x0a;• Standard PrintWindow API calls and desktop-capture apps using WGC / DXGI Desktop Duplication" />
+
+                    <TextBlock Style="{StaticResource BodyTextStyle}" Margin="0,0,0,6"
+                               Text="Not Guaranteed / Unsupported Scenarios:" FontWeight="SemiBold" />
+                    <TextBlock Style="{StaticResource BodyTextStyle}" Margin="10,0,0,0"
+                               Text="• Hardware HDMI/DisplayPort capture cards and external cameras photographing your screen&#x0a;• Kernel/display-driver level hooks or privileged system/DRM capture tools&#x0a;• Virtual machine host screen recording or certain Remote Desktop (RDP) display adapters&#x0a;• Meeting software (Google Meet, Zoom, Microsoft Teams) native sharing/policy controls" />
+                </StackPanel>
+            </Border>
+
+            <!-- Explicit Limitations & Ethical Notice -->
+            <Border Style="{StaticResource WarningBannerStyle}">
+                <StackPanel>
+                    <TextBlock Text="Important Privacy &amp; Screen-Sharing Limitations"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource StatusWarningFgBrush}"
+                               Margin="0,0,0,6" />
+                    <TextBlock Text="{Binding LimitationNotice}"
+                               FontSize="12.5"
+                               LineHeight="19"
+                               Foreground="{DynamicResource StatusWarningFgBrush}"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

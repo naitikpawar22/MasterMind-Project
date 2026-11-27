@@ -1,0 +1,19 @@
+# .NET / Visual Studio / Rider
+bin/
+obj/
+out/
+dist/
+TestResults/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+.idea/
+*.csproj.user
+
+# Logs & user local artifacts
+*.log
+*.tmp
+_ReSharper*/
+*.DotSettings.user

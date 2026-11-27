@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2006/svg" viewBox="0 0 256 256" width="256" height="256">
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="#1D4ED8" />
+  <rect x="22" y="22" width="212" height="212" rx="46" fill="none" stroke="#93C5FD" stroke-opacity="0.35" stroke-width="3" />
+  <!-- Laptop Screen Outer Frame -->
+  <rect x="58" y="64" width="140" height="92" rx="10" fill="#FFFFFF" />
+  <!-- Laptop Inner Display -->
+  <rect x="68" y="74" width="120" height="72" rx="4" fill="#0F172A" />
+  <!-- Minimal UI lines inside screen -->
+  <rect x="80" y="88" width="54" height="8" rx="4" fill="#60A5FA" />
+  <rect x="80" y="104" width="88" height="6" rx="3" fill="#94A3B8" fill-opacity="0.7" />
+  <rect x="80" y="116" width="70" height="6" rx="3" fill="#94A3B8" fill-opacity="0.5" />
+  <!-- Laptop Keyboard Base -->
+  <path d="M40 162 H216 L224 176 C225 180 222 184 217 184 H39 C34 184 31 180 32 176 Z" fill="#FFFFFF" />
+  <!-- Trackpad Notch -->
+  <rect x="108" y="166" width="40" height="6" rx="3" fill="#BFDBFE" />
+</svg>

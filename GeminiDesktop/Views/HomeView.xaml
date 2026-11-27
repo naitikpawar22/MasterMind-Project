@@ -1,0 +1,108 @@
+<UserControl x:Class="GeminiDesktop.Views.HomeView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="32,28,32,32" MaxWidth="920" HorizontalAlignment="Left">
+
+            <!-- Hero Header -->
+            <Border Style="{StaticResource SectionCardStyle}" Margin="0,0,0,20">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Margin="0,0,24,0">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,10">
+                            <Image Source="pack://application:,,,/Assets/app-logo.png"
+                                   Width="32"
+                                   Height="32"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                            <TextBlock Text="Welcome to MyLaptop"
+                                       Style="{StaticResource PageTitleTextStyle}"
+                                       Margin="12,0,0,0"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource PageSubtitleTextStyle}"
+                                   Text="Access your integrated web workspace inside a fast, native Windows desktop shell with adjustable window transparency, persistent session support, and password-protected Privacy Mode controls." />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <Button Content="Open MyLaptop Workspace"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Command="{Binding OpenWorkspaceCommand}"
+                                Padding="20,11" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Status Cards Grid -->
+            <Grid Margin="0,0,0,20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Workspace Engine Status -->
+                <Border Grid.Column="0" Style="{StaticResource SectionCardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="Workspace &amp; Engine" Style="{StaticResource CardTitleTextStyle}" Margin="0,0,0,12" />
+
+                        <TextBlock Text="Target Endpoint" Style="{StaticResource MutedCaptionTextStyle}" />
+                        <TextBlock Text="{Binding GeminiTargetUrl}" FontWeight="SemiBold" Margin="0,2,0,10" />
+
+                        <TextBlock Text="Browser Engine" Style="{StaticResource MutedCaptionTextStyle}" />
+                        <TextBlock Text="{Binding WebView2Status}" FontWeight="SemiBold" Margin="0,2,0,10" />
+
+                        <TextBlock Text="Network Status" Style="{StaticResource MutedCaptionTextStyle}" />
+                        <TextBlock Text="{Binding NetworkStatus}" FontWeight="SemiBold" Margin="0,2,0,14" />
+
+                        <Button Content="Customize Browser Settings"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding OpenSettingsCommand}"
+                                HorizontalAlignment="Left" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Privacy & Window Status -->
+                <Border Grid.Column="2" Style="{StaticResource SectionCardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="Privacy &amp; Window Management" Style="{StaticResource CardTitleTextStyle}" Margin="0,0,0,12" />
+
+                        <TextBlock Text="Current Visibility Status" Style="{StaticResource MutedCaptionTextStyle}" />
+                        <TextBlock Text="{Binding PrivacySummary}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,2,0,10" />
+
+                        <TextBlock Text="Local Session Storage" Style="{StaticResource MutedCaptionTextStyle}" />
+                        <TextBlock Text="{Binding SessionStorageLocation}"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,2,0,14" />
+
+                        <Button Content="Manage Privacy &amp; Window"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding OpenPrivacyCommand}"
+                                HorizontalAlignment="Left" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Security & Integrity Overview -->
+            <Border Style="{StaticResource SectionCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Security &amp; Authentication Design" Style="{StaticResource CardTitleTextStyle}" Margin="0,0,0,10" />
+                    <TextBlock Style="{StaticResource BodyTextStyle}" Margin="0,0,0,8"
+                               Text="• Direct Official Integration: Loads https://gemini.google.com/ directly in Microsoft Edge WebView2 without scraping, proxying, or unofficial APIs." />
+                    <TextBlock Style="{StaticResource BodyTextStyle}" Margin="0,0,0,8"
+                               Text="• Authentic Google Sign-In: Sign in directly through Google's real authentication pages. MyLaptop never reads, intercepts, or saves your password." />
+                    <TextBlock Style="{StaticResource BodyTextStyle}" Margin="0,0,0,8"
+                               Text="• Isolated Session Data: Cookies and site preferences remain in an application-specific local profile directory on your Windows user account." />
+                    <TextBlock Style="{StaticResource BodyTextStyle}"
+                               Text="• Transparent Screen Privacy: Capture exclusion relies strictly on documented Windows APIs and never bypasses meeting software controls." />
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
