@@ -237,13 +237,25 @@ public sealed class ViewModelTests : IDisposable
         mainVm.NavigateCommand.Execute(NavigationSection.About);
         Assert.True(mainVm.IsAboutActive);
 
+        mainVm.NavigateCommand.Execute(NavigationSection.AudioMonitor);
+        Assert.True(mainVm.IsAudioMonitorActive);
+        Assert.False(mainVm.IsDetailSectionActive);
+
         mainVm.NavigateCommand.Execute(NavigationSection.Home);
         Assert.True(mainVm.IsHomeActive);
 
-        geminiVm.IsAudioPanelVisible = false;
         homeVm.OpenAudioMonitorCommand.Execute(null);
-        Assert.True(mainVm.IsGeminiWorkspaceActive);
+        Assert.True(mainVm.IsAudioMonitorActive);
+
+        geminiVm.IsAudioPanelVisible = false;
+        Assert.False(ctx.Settings.CurrentSettings.IsAudioPanelVisible);
+        geminiVm.ToggleAudioPanelCommand.Execute(null);
         Assert.True(geminiVm.IsAudioPanelVisible);
+        Assert.True(ctx.Settings.CurrentSettings.IsAudioPanelVisible);
+
+        var initialSidebar = mainVm.IsSidebarVisible;
+        mainVm.ToggleSidebarCommand.Execute(null);
+        Assert.NotEqual(initialSidebar, mainVm.IsSidebarVisible);
     }
 
     [Fact]

@@ -56,11 +56,7 @@ public sealed class MainViewModel : ViewModelBase
         _currentDetailViewModel = HomeViewModel;
 
         HomeViewModel.OpenWorkspaceRequested += (_, _) => NavigateTo(NavigationSection.GeminiWorkspace);
-        HomeViewModel.OpenAudioMonitorRequested += (_, _) =>
-        {
-            GeminiViewModel.IsAudioPanelVisible = true;
-            NavigateTo(NavigationSection.GeminiWorkspace);
-        };
+        HomeViewModel.OpenAudioMonitorRequested += (_, _) => NavigateTo(NavigationSection.AudioMonitor);
         HomeViewModel.OpenPrivacyRequested += (_, _) => NavigateTo(NavigationSection.PrivacyAndWindowManagement);
         HomeViewModel.OpenSettingsRequested += (_, _) => NavigateTo(NavigationSection.Settings);
         SettingsViewModel.NavigateToPrivacyRequested += (_, _) => NavigateTo(NavigationSection.PrivacyAndWindowManagement);
@@ -172,6 +168,8 @@ public sealed class MainViewModel : ViewModelBase
             if (SetProperty(ref _currentSection, value))
             {
                 OnPropertyChanged(nameof(IsGeminiWorkspaceActive));
+                OnPropertyChanged(nameof(IsAudioMonitorActive));
+                OnPropertyChanged(nameof(IsDetailSectionActive));
                 OnPropertyChanged(nameof(IsHomeActive));
                 OnPropertyChanged(nameof(IsSettingsActive));
                 OnPropertyChanged(nameof(IsPrivacyActive));
@@ -188,6 +186,8 @@ public sealed class MainViewModel : ViewModelBase
     }
 
     public bool IsGeminiWorkspaceActive => CurrentSection == NavigationSection.GeminiWorkspace;
+    public bool IsAudioMonitorActive => CurrentSection == NavigationSection.AudioMonitor;
+    public bool IsDetailSectionActive => !IsGeminiWorkspaceActive && !IsAudioMonitorActive;
     public bool IsHomeActive => CurrentSection == NavigationSection.Home;
     public bool IsSettingsActive => CurrentSection == NavigationSection.Settings;
     public bool IsPrivacyActive => CurrentSection == NavigationSection.PrivacyAndWindowManagement;
@@ -197,6 +197,7 @@ public sealed class MainViewModel : ViewModelBase
     {
         NavigationSection.Home => "Home",
         NavigationSection.GeminiWorkspace => "MyLaptop Workspace",
+        NavigationSection.AudioMonitor => "Audio & Transcript",
         NavigationSection.Settings => "Settings",
         NavigationSection.PrivacyAndWindowManagement => "Privacy & Window Management",
         NavigationSection.About => "About",

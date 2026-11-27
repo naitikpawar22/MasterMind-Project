@@ -32,6 +32,7 @@
         <KeyBinding Key="D3" Modifiers="Alt" Command="{Binding NavigateCommand}" CommandParameter="{x:Static models:NavigationSection.Settings}" />
         <KeyBinding Key="D4" Modifiers="Alt" Command="{Binding NavigateCommand}" CommandParameter="{x:Static models:NavigationSection.PrivacyAndWindowManagement}" />
         <KeyBinding Key="D5" Modifiers="Alt" Command="{Binding NavigateCommand}" CommandParameter="{x:Static models:NavigationSection.About}" />
+        <KeyBinding Key="D6" Modifiers="Alt" Command="{Binding NavigateCommand}" CommandParameter="{x:Static models:NavigationSection.AudioMonitor}" />
         <KeyBinding Key="F5" Command="{Binding GeminiViewModel.ReloadCommand}" />
     </Window.InputBindings>
 
@@ -484,11 +485,30 @@
                         </Grid.RowDefinitions>
 
                         <StackPanel Grid.Row="0" Margin="0,12,0,0">
-                            <TextBlock Text="WORKSPACE"
-                                       FontSize="11"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource TextMutedBrush}"
-                                       Margin="18,4,16,8" />
+                            <Grid Margin="18,4,12,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0"
+                                           Text="WORKSPACE"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextMutedBrush}"
+                                           VerticalAlignment="Center" />
+                                <Button Grid.Column="1"
+                                        Command="{Binding ToggleSidebarCommand}"
+                                        ToolTip="Minimize Sidebar (Ctrl+B)"
+                                        Cursor="Hand"
+                                        Width="22"
+                                        Height="20"
+                                        Background="Transparent"
+                                        BorderThickness="0">
+                                    <Path Width="10" Height="10" Stretch="Uniform"
+                                          Fill="{DynamicResource TextMutedBrush}"
+                                          Data="M15.41,7.41 L14,6 L8,12 L14,18 L15.41,16.59 L10.83,12 Z" />
+                                </Button>
+                            </Grid>
 
                             <RadioButton Style="{StaticResource NavRailButtonStyle}"
                                          GroupName="MainNav"
@@ -511,6 +531,18 @@
                                     <Path Width="15" Height="15" Stretch="Uniform" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="0,0,10,0"
                                           Data="M4,6 H20 V15 H4 V6 Z M2,16 H22 L23,18 H1 L2,16 Z" />
                                     <TextBlock Text="MyLaptop Workspace" VerticalAlignment="Center" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
+                                </StackPanel>
+                            </RadioButton>
+
+                            <RadioButton Style="{StaticResource NavRailButtonStyle}"
+                                         GroupName="MainNav"
+                                         IsChecked="{Binding IsAudioMonitorActive, Mode=OneWay}"
+                                         Command="{Binding NavigateCommand}"
+                                         CommandParameter="{x:Static models:NavigationSection.AudioMonitor}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Width="15" Height="15" Stretch="Uniform" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" Margin="0,0,10,0"
+                                          Data="M12,14 C13.66,14 15,12.66 15,11 V5 C15,3.34 13.66,2 12,2 C10.34,2 9,3.34 9,5 V11 C9,12.66 10.34,14 12,14 Z M17.3,11 C17.3,14 14.76,16.1 12,16.1 C9.24,16.1 6.7,14 6.7,11 H5 C5,14.41 7.72,17.23 11,17.72 V21 H13 V17.72 C16.28,17.23 19,14.41 19,11 H17.3 Z" />
+                                    <TextBlock Text="Audio &amp; Transcript" VerticalAlignment="Center" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}" />
                                 </StackPanel>
                             </RadioButton>
 
@@ -588,8 +620,11 @@
                     <views:GeminiView DataContext="{Binding GeminiViewModel}"
                                       Visibility="{Binding DataContext.IsGeminiWorkspaceActive, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}" />
 
+                    <views:AudioMonitorView DataContext="{Binding GeminiViewModel}"
+                                            Visibility="{Binding DataContext.IsAudioMonitorActive, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}" />
+
                     <ContentControl Content="{Binding CurrentDetailViewModel}"
-                                    Visibility="{Binding IsGeminiWorkspaceActive, Converter={StaticResource InverseBoolToVis}}" />
+                                    Visibility="{Binding IsDetailSectionActive, Converter={StaticResource BoolToVis}}" />
                 </Grid>
             </Grid>
 

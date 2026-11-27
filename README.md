@@ -101,6 +101,7 @@ MasterMind/
 │   │   └── ViewModelBase.cs
 │   └── Views/
 │       ├── AboutView.xaml / .cs
+│       ├── AudioMonitorView.xaml / .cs
 │       ├── GeminiView.xaml / .cs
 │       ├── HomeView.xaml / .cs
 │       ├── MainWindow.xaml / .cs

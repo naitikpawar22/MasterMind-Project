@@ -9,5 +9,6 @@ public enum NavigationSection
     GeminiWorkspace = 1,
     Settings = 2,
     PrivacyAndWindowManagement = 3,
-    About = 4
+    About = 4,
+    AudioMonitor = 5
 }
