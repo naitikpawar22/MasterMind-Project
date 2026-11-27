@@ -8,7 +8,7 @@ using GeminiDesktop.Services;
 namespace GeminiDesktop.ViewModels;
 
 /// <summary>
-/// ViewModel for General, Appearance, Browser, Microphone/Audio, Privacy Summary, and About sections in Settings.
+/// ViewModel for General, Appearance, Browser, Dual Audio & Speech Transcription, Privacy Summary, and About sections in Settings.
 /// </summary>
 public sealed class SettingsViewModel : ViewModelBase
 {
@@ -18,9 +18,13 @@ public sealed class SettingsViewModel : ViewModelBase
     private readonly IGeminiBrowserService _browserService;
     private readonly IPrivacyService _privacyService;
     private readonly IMicrophoneService _microphoneService;
+    private readonly ISystemAudioService _systemAudioService;
+    private readonly ISpeechTranscriptionService _transcriptionService;
     private readonly IDialogService _dialogService;
 
     private MicrophoneState _microphoneState;
+    private SystemAudioState _systemAudioState;
+    private TranscriptionState _transcriptionState;
 
     private LaunchDestination _launchBehavior;
     private bool _launchOnWindowsStartup;
@@ -50,6 +54,8 @@ public sealed class SettingsViewModel : ViewModelBase
         IGeminiBrowserService browserService,
         IPrivacyService privacyService,
         IMicrophoneService microphoneService,
+        ISystemAudioService systemAudioService,
+        ISpeechTranscriptionService transcriptionService,
         IDialogService dialogService)
     {
         _settingsService = settingsService;
@@ -58,8 +64,13 @@ public sealed class SettingsViewModel : ViewModelBase
         _browserService = browserService;
         _privacyService = privacyService;
         _microphoneService = microphoneService;
+        _systemAudioService = systemAudioService;
+        _transcriptionService = transcriptionService;
         _dialogService = dialogService;
+
         _microphoneState = _microphoneService.CurrentState;
+        _systemAudioState = _systemAudioService.CurrentState;
+        _transcriptionState = _transcriptionService.CurrentState;
 
         SaveSettingsCommand = new RelayCommand(SaveSettings);
         ResetToDefaultsCommand = new RelayCommand(ResetAllSettingsWithConfirmation);
@@ -71,23 +82,31 @@ public sealed class SettingsViewModel : ViewModelBase
         OpenPrivacyModuleCommand = new RelayCommand(() => NavigateToPrivacyRequested?.Invoke(this, EventArgs.Empty));
         OpenAboutViewCommand = new RelayCommand(() => NavigateToAboutRequested?.Invoke(this, EventArgs.Empty));
         SetOpacityPresetCommand = new RelayCommand<string>(ApplyOpacityPreset);
+
+        StartMicrophoneCommand = new RelayCommand(
+            () => _microphoneService.StartListening(),
+            () => !IsMicrophoneListening && IsMicrophoneDeviceAvailable && !IsMicrophonePermissionDenied);
+        StopMicrophoneCommand = new RelayCommand(
+            () => _microphoneService.StopListening(),
+            () => IsMicrophoneListening);
         RefreshMicrophonesCommand = new RelayCommand(() => _microphoneService.RefreshDevices());
         ToggleMicrophoneMuteCommand = new RelayCommand(() => _microphoneService.ToggleMute(), () => _microphoneState.IsDeviceAvailable);
         OpenWindowsMicPrivacyCommand = new RelayCommand(() => _microphoneService.OpenWindowsMicrophonePrivacySettings());
 
+        StartSystemAudioCommand = new RelayCommand(
+            () => _systemAudioService.StartListening(),
+            () => !IsSystemAudioListening && IsSystemAudioDeviceAvailable);
+        StopSystemAudioCommand = new RelayCommand(
+            () => _systemAudioService.StopListening(),
+            () => IsSystemAudioListening);
+        RefreshSystemAudioCommand = new RelayCommand(() => _systemAudioService.RefreshDevice());
+        ToggleSystemAudioMuteCommand = new RelayCommand(() => _systemAudioService.ToggleMute(), () => _systemAudioState.IsDeviceAvailable);
+        OpenWindowsSoundSettingsCommand = new RelayCommand(() => _systemAudioService.OpenWindowsSoundSettings());
+
         _privacyService.PrivacyStatusChanged += (_, _) => RefreshPrivacyAndAboutSummary();
-        _microphoneService.StateChanged += (_, micState) =>
-        {
-            var dispatcher = Application.Current?.Dispatcher;
-            if (dispatcher is null || dispatcher.CheckAccess())
-            {
-                ApplyMicrophoneState(micState);
-            }
-            else
-            {
-                dispatcher.BeginInvoke(() => ApplyMicrophoneState(micState));
-            }
-        };
+        _microphoneService.StateChanged += (_, micState) => RunOnUi(() => ApplyMicrophoneState(micState));
+        _systemAudioService.StateChanged += (_, sysState) => RunOnUi(() => ApplySystemAudioState(sysState));
+        _transcriptionService.StateChanged += (_, txState) => RunOnUi(() => ApplyTranscriptionState(txState));
         _windowService.WindowOpacityChanged += (_, opacity) =>
         {
             if (Math.Abs(_windowOpacity - opacity) > 0.001)
@@ -116,9 +135,18 @@ public sealed class SettingsViewModel : ViewModelBase
     public ICommand OpenPrivacyModuleCommand { get; }
     public ICommand OpenAboutViewCommand { get; }
     public ICommand SetOpacityPresetCommand { get; }
+
+    public RelayCommand StartMicrophoneCommand { get; }
+    public RelayCommand StopMicrophoneCommand { get; }
     public ICommand RefreshMicrophonesCommand { get; }
     public RelayCommand ToggleMicrophoneMuteCommand { get; }
     public ICommand OpenWindowsMicPrivacyCommand { get; }
+
+    public RelayCommand StartSystemAudioCommand { get; }
+    public RelayCommand StopSystemAudioCommand { get; }
+    public ICommand RefreshSystemAudioCommand { get; }
+    public RelayCommand ToggleSystemAudioMuteCommand { get; }
+    public ICommand OpenWindowsSoundSettingsCommand { get; }
 
     // Microphone Input Controls
     public IReadOnlyList<MicrophoneDevice> MicrophoneDevices => _microphoneState.Devices;
@@ -161,6 +189,8 @@ public sealed class SettingsViewModel : ViewModelBase
         }
     }
 
+    public bool IsMicrophoneListening => _microphoneState.IsMonitoring;
+    public bool IsMicrophonePermissionDenied => _microphoneState.PermissionState == MicrophonePermissionState.DeniedByWindows;
     public int MicrophoneLevelPercent => _microphoneState.InputLevelPercent;
     public bool IsMicrophoneMuted => _microphoneState.IsMuted;
     public bool IsMicrophoneDeviceAvailable => _microphoneState.IsDeviceAvailable;
@@ -168,6 +198,48 @@ public sealed class SettingsViewModel : ViewModelBase
     public string MicrophoneStatusText => _microphoneState.StatusText;
     public string MicrophoneErrorMessage => _microphoneState.ErrorMessage ?? string.Empty;
     public string ActiveMicrophoneName => _microphoneState.ActiveDeviceName;
+
+    // System Audio Loopback Controls
+    public bool EnableSystemAudioMonitoring
+    {
+        get => _systemAudioState.IsListening || _settingsService.CurrentSettings.EnableSystemAudioMonitoring;
+        set
+        {
+            if (_settingsService.CurrentSettings.EnableSystemAudioMonitoring != value)
+            {
+                if (value) _systemAudioService.StartListening();
+                else _systemAudioService.StopListening();
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public bool IsSystemAudioListening => _systemAudioState.IsListening;
+    public int SystemAudioLevelPercent => _systemAudioState.OutputLevelPercent;
+    public bool IsSystemAudioMuted => _systemAudioState.IsMuted;
+    public bool IsSystemAudioDeviceAvailable => _systemAudioState.IsDeviceAvailable;
+    public string SystemAudioMuteButtonText => _systemAudioState.IsMuted ? "Unmute System Audio" : "Mute System Audio";
+    public string SystemAudioStatusText => _systemAudioState.StatusText;
+    public string SystemAudioErrorMessage => _systemAudioState.ErrorMessage ?? string.Empty;
+    public string ActiveSystemAudioDeviceName => _systemAudioState.ActiveDeviceName;
+
+    // Speech Transcription Settings
+    public bool EnableLiveSpeechTranscription
+    {
+        get => _transcriptionState.IsEnabled;
+        set
+        {
+            if (_transcriptionState.IsEnabled != value)
+            {
+                _transcriptionService.SetEnabled(value);
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public string TranscriptionStatusText => _transcriptionState.StatusText;
+    public string RecognizerDisplayName => _transcriptionState.RecognizerDisplayName;
+    public string TranscriptionErrorMessage => _transcriptionState.ErrorMessage ?? string.Empty;
 
     public double WindowOpacity
     {
@@ -300,7 +372,7 @@ public sealed class SettingsViewModel : ViewModelBase
             if (!PrivacyService.TryChangePrivacyModeWithPassword(_privacyService, _dialogService, value))
             {
                 OnPropertyChanged(nameof(IsPrivacyModeEnabled));
-                System.Windows.Application.Current?.Dispatcher?.BeginInvoke(
+                Application.Current?.Dispatcher?.BeginInvoke(
                     () => OnPropertyChanged(nameof(IsPrivacyModeEnabled)));
                 return;
             }
@@ -367,6 +439,8 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectedMicrophoneId));
         OnPropertyChanged(nameof(AllowMicrophoneAccess));
         OnPropertyChanged(nameof(EnableMicrophoneLevelMonitoring));
+        OnPropertyChanged(nameof(IsMicrophoneListening));
+        OnPropertyChanged(nameof(IsMicrophonePermissionDenied));
         OnPropertyChanged(nameof(MicrophoneLevelPercent));
         OnPropertyChanged(nameof(IsMicrophoneMuted));
         OnPropertyChanged(nameof(IsMicrophoneDeviceAvailable));
@@ -374,7 +448,48 @@ public sealed class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(MicrophoneStatusText));
         OnPropertyChanged(nameof(MicrophoneErrorMessage));
         OnPropertyChanged(nameof(ActiveMicrophoneName));
+        StartMicrophoneCommand.RaiseCanExecuteChanged();
+        StopMicrophoneCommand.RaiseCanExecuteChanged();
         ToggleMicrophoneMuteCommand.RaiseCanExecuteChanged();
+    }
+
+    private void ApplySystemAudioState(SystemAudioState sysState)
+    {
+        _systemAudioState = sysState;
+        OnPropertyChanged(nameof(EnableSystemAudioMonitoring));
+        OnPropertyChanged(nameof(IsSystemAudioListening));
+        OnPropertyChanged(nameof(SystemAudioLevelPercent));
+        OnPropertyChanged(nameof(IsSystemAudioMuted));
+        OnPropertyChanged(nameof(IsSystemAudioDeviceAvailable));
+        OnPropertyChanged(nameof(SystemAudioMuteButtonText));
+        OnPropertyChanged(nameof(SystemAudioStatusText));
+        OnPropertyChanged(nameof(SystemAudioErrorMessage));
+        OnPropertyChanged(nameof(ActiveSystemAudioDeviceName));
+        StartSystemAudioCommand.RaiseCanExecuteChanged();
+        StopSystemAudioCommand.RaiseCanExecuteChanged();
+        ToggleSystemAudioMuteCommand.RaiseCanExecuteChanged();
+    }
+
+    private void ApplyTranscriptionState(TranscriptionState txState)
+    {
+        _transcriptionState = txState;
+        OnPropertyChanged(nameof(EnableLiveSpeechTranscription));
+        OnPropertyChanged(nameof(TranscriptionStatusText));
+        OnPropertyChanged(nameof(RecognizerDisplayName));
+        OnPropertyChanged(nameof(TranscriptionErrorMessage));
+    }
+
+    private static void RunOnUi(Action action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            action();
+        }
+        else
+        {
+            dispatcher.BeginInvoke(action);
+        }
     }
 
     private void LoadFromSettings(AppSettings s)
@@ -445,7 +560,10 @@ public sealed class SettingsViewModel : ViewModelBase
             WindowOpacity = AppSettings.ClampOpacity(WindowOpacity),
             PreferredMicrophoneId = SelectedMicrophoneId,
             AllowMicrophoneAccess = AllowMicrophoneAccess,
-            EnableMicrophoneLevelMonitoring = EnableMicrophoneLevelMonitoring
+            EnableMicrophoneLevelMonitoring = EnableMicrophoneLevelMonitoring,
+            EnableSystemAudioMonitoring = EnableSystemAudioMonitoring,
+            EnableLiveSpeechTranscription = EnableLiveSpeechTranscription,
+            IsAudioPanelVisible = _settingsService.CurrentSettings.IsAudioPanelVisible
         };
 
         _settingsService.SaveSettings(updated);
@@ -459,7 +577,7 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         if (!_dialogService.Confirm(
                 "Reset Application Settings",
-                "Reset all general, appearance, and browser preferences back to their defaults? Your Google account session in WebView2 will remain untouched.",
+                "Reset all general, appearance, audio, and browser preferences back to their defaults? Your Google account session in WebView2 will remain untouched.",
                 isDestructive: false))
         {
             return;
@@ -468,6 +586,12 @@ public sealed class SettingsViewModel : ViewModelBase
         var defaults = _settingsService.ResetSettingsToDefaults();
         LoadFromSettings(defaults);
         _themeService.ApplyTheme(defaults.Theme);
+        _microphoneService.SetWorkspaceMicrophoneAllowed(defaults.AllowMicrophoneAccess);
+        _microphoneService.SetMonitoringEnabled(defaults.EnableMicrophoneLevelMonitoring);
+        _microphoneService.SelectDevice(defaults.PreferredMicrophoneId);
+        if (defaults.EnableSystemAudioMonitoring) _systemAudioService.StartListening();
+        else _systemAudioService.StopListening();
+        _transcriptionService.SetEnabled(defaults.EnableLiveSpeechTranscription);
         FeedbackMessage = "All application settings were restored to defaults.";
     }
 

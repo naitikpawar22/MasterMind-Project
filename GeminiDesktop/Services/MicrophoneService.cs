@@ -1,6 +1,6 @@
-using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using GeminiDesktop.Helpers;
 using GeminiDesktop.Models;
 using Microsoft.Win32;
 using NAudio.CoreAudioApi;
@@ -25,36 +25,34 @@ public interface IMicrophoneBackend : IDisposable
     bool TrySetEndpointMute(string deviceId, bool muted);
     void StartCapture(string deviceId);
     void StopCapture();
+    void SetMutedSuppression(bool muted);
+    void SetPcmSink(Pcm16kSpanHandler? sink);
 }
 
 /// <summary>
 /// Real Windows WASAPI backend capturing strictly from physical DataFlow.Capture microphone devices.
-/// Never enumerates or captures DataFlow.Render (system loopback) devices.
 /// </summary>
 public sealed class WasapiMicrophoneBackend : IMicrophoneBackend
 {
     private const string MicrophoneConsentKey = @"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
     private const string NonPackagedConsentKey = @"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone\NonPackaged";
 
-    private readonly object _captureLock = new();
     private readonly MMDeviceEnumerator _enumerator;
     private readonly MMDeviceNotificationClient? _notificationClient;
+    private readonly WasapiStreamCaptureSession _session;
 
-    private WasapiRecorder? _recorder;
-    private WaveFormat? _activeWaveFormat;
-    private MMDevice? _activeEndpoint;
-    private double _smoothedLevel;
-    private long _lastEmitTickMs;
-    private volatile bool _capturing;
     private bool _disposed;
 
     public WasapiMicrophoneBackend()
     {
         _enumerator = new MMDeviceEnumerator();
+        _session = new WasapiStreamCaptureSession(
+            isLoopback: false,
+            onLevel: level => AudioLevelMeasured?.Invoke(this, level),
+            onStoppedUnexpectedly: ex => CaptureStoppedUnexpectedly?.Invoke(this, ex));
+
         try
         {
-            // Raise endpoint callbacks off-thread so Background/Service initialization does not capture a UI SyncContext,
-            // while MicrophoneService marshals refreshes onto Task.Run cleanly.
             _notificationClient = _enumerator.CreateNotificationClient(useSynchronizationContext: false);
             _notificationClient.DeviceStateChanged += OnDeviceStateChanged;
             _notificationClient.DeviceAdded += OnDeviceAdded;
@@ -94,7 +92,7 @@ public sealed class WasapiMicrophoneBackend : IMicrophoneBackend
     public IReadOnlyList<MicrophoneDevice> EnumerateCaptureDevices()
     {
         var list = new List<MicrophoneDevice>();
-        string? defaultId = ResolveDefaultCaptureDeviceId();
+        var defaultId = ResolveDefaultCaptureDeviceId();
 
         // Strictly DataFlow.Capture (physical microphones/input devices only).
         var endpoints = _enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
@@ -170,13 +168,11 @@ public sealed class WasapiMicrophoneBackend : IMicrophoneBackend
 
         try
         {
-            lock (_captureLock)
+            var active = _session.ActiveDevice;
+            if (active is not null && string.Equals(active.ID, deviceId, StringComparison.OrdinalIgnoreCase))
             {
-                if (_activeEndpoint is not null && string.Equals(_activeEndpoint.ID, deviceId, StringComparison.OrdinalIgnoreCase))
-                {
-                    _activeEndpoint.AudioEndpointVolume.Mute = muted;
-                    return true;
-                }
+                active.AudioEndpointVolume.Mute = muted;
+                return true;
             }
 
             using var device = _enumerator.GetDevice(deviceId);
@@ -192,146 +188,43 @@ public sealed class WasapiMicrophoneBackend : IMicrophoneBackend
     public void StartCapture(string deviceId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
-
         StopCapture();
 
-        lock (_captureLock)
+        var device = _enumerator.GetDevice(deviceId);
+        _session.Start(device, dev =>
         {
-            if (_disposed)
-            {
-                return;
-            }
-
-            var device = _enumerator.GetDevice(deviceId);
-            if (device.DataFlow != DataFlow.Capture)
-            {
-                device.Dispose();
-                throw new InvalidOperationException("Only physical audio capture devices (microphones) are permitted.");
-            }
-
-            _activeEndpoint = device;
             try
             {
-                _activeEndpoint.AudioEndpointVolume.OnVolumeNotification += OnEndpointVolumeNotification;
+                dev.AudioEndpointVolume.OnVolumeNotification += OnEndpointVolumeNotification;
             }
             catch
             {
-                // Some virtual/specialty endpoints do not expose AudioEndpointVolume notifications.
+                // Some endpoints do not expose hardware volume notifications.
             }
-
-            // Use WasapiRecorder on the explicit DataFlow.Capture device (never loopback) for low-overhead level monitoring.
-            var recorder = new WasapiRecorderBuilder()
-                .WithDevice(device)
-                .WithSharedMode()
-                .WithEventSync()
-                .Build();
-            Volatile.Write(ref _activeWaveFormat, recorder.WaveFormat);
-            recorder.DataAvailable += OnCaptureDataAvailable;
-            recorder.RecordingStopped += OnCaptureRecordingStopped;
-            _recorder = recorder;
-            _smoothedLevel = 0.0;
-            _lastEmitTickMs = 0;
-            _capturing = true;
-
-            recorder.StartRecording();
-            Volatile.Write(ref _activeWaveFormat, recorder.WaveFormat);
-        }
+        });
     }
 
     public void StopCapture()
     {
-        _capturing = false;
-        WasapiRecorder? oldRecorder;
-        MMDevice? oldEndpoint;
-
-        lock (_captureLock)
-        {
-            oldRecorder = _recorder;
-            _recorder = null;
-            oldEndpoint = _activeEndpoint;
-            _activeEndpoint = null;
-            Volatile.Write(ref _activeWaveFormat, null);
-            _smoothedLevel = 0.0;
-        }
-
-        // Stop/dispose outside _captureLock so the capture callback thread can exit cleanly without deadlocking.
-        if (oldRecorder is not null)
-        {
-            oldRecorder.DataAvailable -= OnCaptureDataAvailable;
-            oldRecorder.RecordingStopped -= OnCaptureRecordingStopped;
-            try
-            {
-                oldRecorder.StopRecording();
-            }
-            catch
-            {
-                // Ignore stop errors if the device was already disconnected.
-            }
-
-            try
-            {
-                oldRecorder.Dispose();
-            }
-            catch
-            {
-                // Ignore disposal errors on disconnected audio endpoints.
-            }
-        }
-
-        if (oldEndpoint is not null)
+        _session.Stop(dev =>
         {
             try
             {
-                oldEndpoint.AudioEndpointVolume.OnVolumeNotification -= OnEndpointVolumeNotification;
+                dev.AudioEndpointVolume.OnVolumeNotification -= OnEndpointVolumeNotification;
             }
             catch
             {
                 // Ignore unsubscribe issues.
             }
-
-            oldEndpoint.Dispose();
-        }
+        });
     }
 
-    private void OnCaptureDataAvailable(ReadOnlySpan<byte> buffer, AudioClientBufferFlags flags, long devicePosition, long qpcPosition)
-    {
-        if (!_capturing)
-        {
-            return;
-        }
+    public void SetMutedSuppression(bool muted) => _session.SetSuppressOutput(muted);
 
-        var format = Volatile.Read(ref _activeWaveFormat);
-        if (format is null)
-        {
-            return;
-        }
+    public void SetPcmSink(Pcm16kSpanHandler? sink) => _session.SetPcmSink(sink);
 
-        var rawPeak = (flags & AudioClientBufferFlags.Silent) != 0 || buffer.IsEmpty
-            ? 0.0
-            : MicrophoneService.ComputePeakAmplitude(buffer, format);
-        var perceptual = rawPeak > 0.001 ? Math.Pow(rawPeak, 0.55) : 0.0;
-        _smoothedLevel = Math.Max(perceptual, _smoothedLevel * 0.72);
-
-        var now = Environment.TickCount64;
-        if (now - _lastEmitTickMs >= 33)
-        {
-            _lastEmitTickMs = now;
-            AudioLevelMeasured?.Invoke(this, Math.Clamp(_smoothedLevel, 0.0, 1.0));
-        }
-    }
-
-    private void OnCaptureRecordingStopped(object? sender, StoppedEventArgs e)
-    {
-        if (e.Exception is not null)
-        {
-            CaptureStoppedUnexpectedly?.Invoke(this, e.Exception);
-        }
-    }
-
-    private void OnEndpointVolumeNotification(AudioVolumeNotificationData data)
-    {
+    private void OnEndpointVolumeNotification(AudioVolumeNotificationData data) =>
         ExternalMuteChanged?.Invoke(this, data.Muted);
-    }
 
     private static bool IsConsentDenied(RegistryKey root, string subKeyPath)
     {
@@ -366,6 +259,7 @@ public sealed class WasapiMicrophoneBackend : IMicrophoneBackend
 
         _disposed = true;
         StopCapture();
+        _session.Dispose();
 
         if (_notificationClient is not null)
         {
@@ -388,7 +282,7 @@ public sealed class WasapiMicrophoneBackend : IMicrophoneBackend
 }
 
 /// <summary>
-/// Manages physical microphone selection, OS/app permissions, mute/unmute, live level metering,
+/// Manages physical microphone selection, OS/app permissions, start/stop/mute controls, live level metering,
 /// and graceful hot-plug/disconnection handling.
 /// </summary>
 public interface IMicrophoneService : IDisposable
@@ -399,11 +293,14 @@ public interface IMicrophoneService : IDisposable
 
     void Initialize();
     void RefreshDevices(string? notificationStatus = null);
+    void StartListening();
+    void StopListening();
     void SelectDevice(string deviceId);
     void SetMuted(bool muted);
     void ToggleMute();
     void SetMonitoringEnabled(bool enabled);
     void SetWorkspaceMicrophoneAllowed(bool allowed);
+    void SetPcmSink(Pcm16kSpanHandler? sink);
     void OpenWindowsMicrophonePrivacySettings();
 }
 
@@ -453,6 +350,12 @@ public sealed class MicrophoneService : IMicrophoneService
     public event EventHandler<MicrophoneState>? StateChanged;
 
     public void Initialize() => RefreshDevices();
+
+    public void StartListening() => SetMonitoringEnabled(true);
+
+    public void StopListening() => SetMonitoringEnabled(false);
+
+    public void SetPcmSink(Pcm16kSpanHandler? sink) => _backend.SetPcmSink(sink);
 
     public void RefreshDevices(string? notificationStatus = null)
     {
@@ -552,7 +455,7 @@ public sealed class MicrophoneService : IMicrophoneService
                     InputLevel = 0.0,
                     IsDeviceAvailable = true,
                     HasError = false,
-                    StatusText = effectiveStatus ?? (_isMuted ? $"Muted · {activeName}" : $"Ready · {activeName}")
+                    StatusText = effectiveStatus ?? $"Stopped · {activeName}"
                 });
                 return;
             }
@@ -590,6 +493,7 @@ public sealed class MicrophoneService : IMicrophoneService
         lock (_sync)
         {
             _isMuted = muted;
+            _backend.SetMutedSuppression(muted);
 
             if (!string.IsNullOrWhiteSpace(_activeCaptureEndpointId))
             {
@@ -603,7 +507,7 @@ public sealed class MicrophoneService : IMicrophoneService
             }
 
             var current = _state;
-            var status = current.IsDeviceAvailable
+            var status = current.IsDeviceAvailable && current.IsMonitoring
                 ? (muted ? $"Muted · {current.ActiveDeviceName}" : $"Listening · {current.ActiveDeviceName}")
                 : current.StatusText;
 
@@ -669,74 +573,8 @@ public sealed class MicrophoneService : IMicrophoneService
     /// <summary>
     /// Computes normalized [0.0, 1.0] peak amplitude from raw WASAPI PCM or IEEE float audio frames.
     /// </summary>
-    public static double ComputePeakAmplitude(byte[] buffer, int bytesRecorded, WaveFormat format)
-    {
-        if (buffer is null || bytesRecorded <= 0 || format is null)
-        {
-            return 0.0;
-        }
-
-        return ComputePeakAmplitude(buffer.AsSpan(0, Math.Min(bytesRecorded, buffer.Length)), format);
-    }
-
-    /// <summary>
-    /// Zero-copy overload computing normalized [0.0, 1.0] peak amplitude directly over a WASAPI audio span.
-    /// </summary>
-    public static double ComputePeakAmplitude(ReadOnlySpan<byte> buffer, WaveFormat format)
-    {
-        if (buffer.IsEmpty || format is null)
-        {
-            return 0.0;
-        }
-
-        float max = 0f;
-
-        if (format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample == 32)
-        {
-            for (var i = 0; i + 3 < buffer.Length; i += 4)
-            {
-                var sample = Math.Abs(BinaryPrimitives.ReadSingleLittleEndian(buffer.Slice(i, 4)));
-                if (!float.IsNaN(sample) && !float.IsInfinity(sample) && sample > max)
-                {
-                    max = sample;
-                }
-            }
-
-            return Math.Clamp(max, 0.0, 1.0);
-        }
-
-        if (format.BitsPerSample == 16)
-        {
-            for (var i = 0; i + 1 < buffer.Length; i += 2)
-            {
-                var raw = BinaryPrimitives.ReadInt16LittleEndian(buffer.Slice(i, 2));
-                var sample = Math.Abs(raw == short.MinValue ? 1.0f : raw / 32768f);
-                if (sample > max)
-                {
-                    max = sample;
-                }
-            }
-
-            return Math.Clamp(max, 0.0, 1.0);
-        }
-
-        if (format.BitsPerSample == 32)
-        {
-            for (var i = 0; i + 3 < buffer.Length; i += 4)
-            {
-                var raw = BinaryPrimitives.ReadInt32LittleEndian(buffer.Slice(i, 4));
-                var sample = Math.Abs(raw == int.MinValue ? 1.0f : raw / 2147483648f);
-                if (sample > max)
-                {
-                    max = sample;
-                }
-            }
-
-            return Math.Clamp(max, 0.0, 1.0);
-        }
-
-        return 0.0;
-    }
+    public static double ComputePeakAmplitude(byte[] buffer, int bytesRecorded, WaveFormat format) =>
+        AudioProcessingHelper.ComputePeakAmplitude(buffer, bytesRecorded, format);
 
     private void StartOrMaintainCaptureLocked(
         IReadOnlyList<MicrophoneDevice> uiDevices,
@@ -747,6 +585,7 @@ public sealed class MicrophoneService : IMicrophoneService
     {
         if (string.Equals(_activeCaptureEndpointId, resolvedTargetId, StringComparison.OrdinalIgnoreCase) && _state.IsMonitoring)
         {
+            _backend.SetMutedSuppression(_isMuted);
             UpdateStateLocked(CopyWith(_state,
                 devices: uiDevices,
                 selectedDeviceId: _selectedDeviceId,
@@ -762,6 +601,7 @@ public sealed class MicrophoneService : IMicrophoneService
 
         try
         {
+            _backend.SetMutedSuppression(_isMuted);
             _backend.StartCapture(resolvedTargetId);
             _activeCaptureEndpointId = resolvedTargetId;
 
@@ -849,7 +689,7 @@ public sealed class MicrophoneService : IMicrophoneService
         }
     }
 
-    private string? ResolveTargetEndpointId(
+    private static string? ResolveTargetEndpointId(
         IReadOnlyList<MicrophoneDevice> activeDevices,
         string? defaultEndpointId,
         string selectedDeviceId,
@@ -955,10 +795,11 @@ public sealed class MicrophoneService : IMicrophoneService
             }
 
             _isMuted = muted;
+            _backend.SetMutedSuppression(muted);
             UpdateStateLocked(CopyWith(_state,
                 isMuted: muted,
                 inputLevel: muted ? 0.0 : _state.InputLevel,
-                statusText: _state.IsDeviceAvailable
+                statusText: _state.IsDeviceAvailable && _state.IsMonitoring
                     ? (muted ? $"Muted · {_state.ActiveDeviceName}" : $"Listening · {_state.ActiveDeviceName}")
                     : _state.StatusText));
         }

@@ -56,6 +56,11 @@ public sealed class MainViewModel : ViewModelBase
         _currentDetailViewModel = HomeViewModel;
 
         HomeViewModel.OpenWorkspaceRequested += (_, _) => NavigateTo(NavigationSection.GeminiWorkspace);
+        HomeViewModel.OpenAudioMonitorRequested += (_, _) =>
+        {
+            GeminiViewModel.IsAudioPanelVisible = true;
+            NavigateTo(NavigationSection.GeminiWorkspace);
+        };
         HomeViewModel.OpenPrivacyRequested += (_, _) => NavigateTo(NavigationSection.PrivacyAndWindowManagement);
         HomeViewModel.OpenSettingsRequested += (_, _) => NavigateTo(NavigationSection.Settings);
         SettingsViewModel.NavigateToPrivacyRequested += (_, _) => NavigateTo(NavigationSection.PrivacyAndWindowManagement);

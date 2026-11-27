@@ -210,16 +210,17 @@
                 </StackPanel>
             </Border>
 
-            <!-- Microphone & Audio Input -->
+            <!-- Dual Audio Input, System Loopback, & Live Speech Recognition -->
             <Border Style="{StaticResource SectionCardStyle}" Margin="0,0,0,16">
                 <StackPanel>
-                    <TextBlock Text="Microphone &amp; Audio Input" Style="{StaticResource CardTitleTextStyle}" Margin="0,0,0,6" />
-                    <TextBlock Text="Uses physical microphone capture devices only, with OS privacy permission checks, live audio-level monitoring, and mute control."
+                    <TextBlock Text="Microphone, System Audio &amp; Live Speech Recognition" Style="{StaticResource CardTitleTextStyle}" Margin="0,0,0,6" />
+                    <TextBlock Text="Capture physical microphone voice input and Windows playback output (loopback) simultaneously, with separate controls and real-time speech transcription."
                                Style="{StaticResource MutedCaptionTextStyle}"
-                               Margin="0,0,0,12" />
+                               Margin="0,0,0,14" />
 
-                    <TextBlock Text="Preferred Microphone Device" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6" />
-                    <Grid Margin="0,0,0,12">
+                    <!-- Source 1: Physical Microphone -->
+                    <TextBlock Text="1. Preferred Microphone Device" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6" />
+                    <Grid Margin="0,0,0,10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -245,11 +246,11 @@
 
                     <CheckBox Style="{StaticResource ModernToggleSwitchStyle}"
                               IsChecked="{Binding EnableMicrophoneLevelMonitoring}"
-                              Content="Monitor live physical microphone audio level"
-                              Margin="0,0,0,14" />
+                              Content="Enable physical microphone capture &amp; activity meter"
+                              Margin="0,0,0,10" />
 
-                    <TextBlock Text="Real-Time Microphone Input Level" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6" />
-                    <Grid Margin="0,0,0,8">
+                    <TextBlock Text="Microphone Input Activity" FontWeight="SemiBold" FontSize="12.5" Margin="0,0,0,4" />
+                    <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="48" />
@@ -284,25 +285,137 @@
 
                     <TextBlock Text="{Binding MicrophoneStatusText}"
                                Style="{StaticResource MutedCaptionTextStyle}"
-                               Margin="0,0,0,10" />
+                               Margin="0,0,0,8" />
 
                     <Border Style="{StaticResource WarningBannerStyle}"
                             Visibility="{Binding MicrophoneErrorMessage, Converter={StaticResource StringToVis}}"
-                            Margin="0,0,0,12">
+                            Margin="0,0,0,10">
                         <TextBlock Text="{Binding MicrophoneErrorMessage}"
                                    Foreground="{DynamicResource StatusWarningFgBrush}"
                                    TextWrapping="Wrap" />
                     </Border>
 
-                    <StackPanel Orientation="Horizontal">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <Button Content="Start Microphone"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding StartMicrophoneCommand}"
+                                Margin="0,0,8,0" />
+                        <Button Content="Stop Microphone"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding StopMicrophoneCommand}"
+                                Margin="0,0,8,0" />
                         <Button Content="{Binding MicrophoneMuteButtonText}"
                                 Style="{StaticResource SecondaryButtonStyle}"
                                 Command="{Binding ToggleMicrophoneMuteCommand}"
-                                Margin="0,0,10,0" />
-                        <Button Content="Windows Microphone Privacy Settings"
+                                Margin="0,0,8,0" />
+                        <Button Content="Windows Mic Privacy"
                                 Style="{StaticResource SecondaryButtonStyle}"
                                 Command="{Binding OpenWindowsMicPrivacyCommand}" />
                     </StackPanel>
+
+                    <Separator Background="{DynamicResource BorderSubtleBrush}" Margin="0,0,0,14" />
+
+                    <!-- Source 2: Windows System Audio Loopback -->
+                    <TextBlock Text="2. System Audio Output Loopback (Browsers, Meet, Zoom, YouTube)" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,4" />
+                    <TextBlock Text="{Binding ActiveSystemAudioDeviceName, StringFormat=Active Output Endpoint: {0}}"
+                               FontSize="12.5"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               Margin="0,0,0,8" />
+
+                    <CheckBox Style="{StaticResource ModernToggleSwitchStyle}"
+                              IsChecked="{Binding EnableSystemAudioMonitoring}"
+                              Content="Capture Windows system audio output simultaneously via WASAPI loopback"
+                              Margin="0,0,0,10" />
+
+                    <TextBlock Text="System Audio Activity" FontWeight="SemiBold" FontSize="12.5" Margin="0,0,0,4" />
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="48" />
+                        </Grid.ColumnDefinitions>
+                        <ProgressBar Grid.Column="0"
+                                     Height="10"
+                                     Minimum="0"
+                                     Maximum="100"
+                                     Value="{Binding SystemAudioLevelPercent, Mode=OneWay}"
+                                     Background="{DynamicResource SurfaceSecondaryBrush}"
+                                     BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                     BorderThickness="1"
+                                     VerticalAlignment="Center">
+                            <ProgressBar.Style>
+                                <Style TargetType="ProgressBar">
+                                    <Setter Property="Foreground" Value="{DynamicResource AccentPrimaryBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsSystemAudioMuted}" Value="True">
+                                            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ProgressBar.Style>
+                        </ProgressBar>
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding SystemAudioLevelPercent, StringFormat={}{0}%}"
+                                   FontWeight="SemiBold"
+                                   FontSize="12.5"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Center" />
+                    </Grid>
+
+                    <TextBlock Text="{Binding SystemAudioStatusText}"
+                               Style="{StaticResource MutedCaptionTextStyle}"
+                               Margin="0,0,0,8" />
+
+                    <Border Style="{StaticResource WarningBannerStyle}"
+                            Visibility="{Binding SystemAudioErrorMessage, Converter={StaticResource StringToVis}}"
+                            Margin="0,0,0,10">
+                        <TextBlock Text="{Binding SystemAudioErrorMessage}"
+                                   Foreground="{DynamicResource StatusWarningFgBrush}"
+                                   TextWrapping="Wrap" />
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <Button Content="Start System Audio"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding StartSystemAudioCommand}"
+                                Margin="0,0,8,0" />
+                        <Button Content="Stop System Audio"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding StopSystemAudioCommand}"
+                                Margin="0,0,8,0" />
+                        <Button Content="{Binding SystemAudioMuteButtonText}"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding ToggleSystemAudioMuteCommand}"
+                                Margin="0,0,8,0" />
+                        <Button Content="Refresh Output"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding RefreshSystemAudioCommand}"
+                                Margin="0,0,8,0" />
+                        <Button Content="Windows Sound"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding OpenWindowsSoundSettingsCommand}" />
+                    </StackPanel>
+
+                    <Separator Background="{DynamicResource BorderSubtleBrush}" Margin="0,0,0,14" />
+
+                    <!-- Speech Recognition -->
+                    <TextBlock Text="3. Real-Time Speech-to-Text Engine" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6" />
+                    <CheckBox Style="{StaticResource ModernToggleSwitchStyle}"
+                              IsChecked="{Binding EnableLiveSpeechTranscription}"
+                              Content="Convert Microphone &amp; System Audio speech into source-tagged text in real time"
+                              Margin="0,0,0,8" />
+                    <TextBlock Style="{StaticResource MutedCaptionTextStyle}">
+                        <Run Text="Engine: " FontWeight="SemiBold" />
+                        <Run Text="{Binding RecognizerDisplayName, Mode=OneWay}" />
+                        <Run Text="  ·  Status: " />
+                        <Run Text="{Binding TranscriptionStatusText, Mode=OneWay}" />
+                    </TextBlock>
+                    <Border Style="{StaticResource WarningBannerStyle}"
+                            Visibility="{Binding TranscriptionErrorMessage, Converter={StaticResource StringToVis}}"
+                            Margin="0,8,0,0">
+                        <TextBlock Text="{Binding TranscriptionErrorMessage}"
+                                   Foreground="{DynamicResource StatusWarningFgBrush}"
+                                   TextWrapping="Wrap" />
+                    </Border>
                 </StackPanel>
             </Border>
 

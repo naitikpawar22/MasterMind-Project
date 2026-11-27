@@ -31,7 +31,12 @@
                         <Button Content="Open MyLaptop Workspace"
                                 Style="{StaticResource PrimaryButtonStyle}"
                                 Command="{Binding OpenWorkspaceCommand}"
-                                Padding="20,11" />
+                                Padding="20,11"
+                                Margin="0,0,0,8" />
+                        <Button Content="Audio Monitor &amp; Transcript"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Command="{Binding OpenAudioMonitorCommand}"
+                                Padding="16,8" />
                     </StackPanel>
                 </Grid>
             </Border>

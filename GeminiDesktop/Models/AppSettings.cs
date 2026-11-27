@@ -32,8 +32,8 @@ public enum DefaultWindowSizePreset
 }
 
 /// <summary>
-/// Persistent user preferences for Gemini Desktop.
-/// Does not store credentials, cookies, or Gemini conversation data.
+/// Persistent user preferences for MyLaptop.
+/// Does not store credentials, cookies, or web conversation data.
 /// </summary>
 public sealed class AppSettings
 {
@@ -71,6 +71,12 @@ public sealed class AppSettings
 
     public bool EnableMicrophoneLevelMonitoring { get; set; } = true;
 
+    public bool EnableSystemAudioMonitoring { get; set; } = true;
+
+    public bool EnableLiveSpeechTranscription { get; set; } = true;
+
+    public bool IsAudioPanelVisible { get; set; } = true;
+
     public AppSettings Clone() => new()
     {
         LaunchBehavior = LaunchBehavior,
@@ -88,7 +94,10 @@ public sealed class AppSettings
         WindowOpacity = ClampOpacity(WindowOpacity),
         PreferredMicrophoneId = PreferredMicrophoneId,
         AllowMicrophoneAccess = AllowMicrophoneAccess,
-        EnableMicrophoneLevelMonitoring = EnableMicrophoneLevelMonitoring
+        EnableMicrophoneLevelMonitoring = EnableMicrophoneLevelMonitoring,
+        EnableSystemAudioMonitoring = EnableSystemAudioMonitoring,
+        EnableLiveSpeechTranscription = EnableLiveSpeechTranscription,
+        IsAudioPanelVisible = IsAudioPanelVisible
     };
 
     public static double ClampOpacity(double opacity) =>

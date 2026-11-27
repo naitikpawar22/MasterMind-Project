@@ -30,6 +30,7 @@ public sealed class HomeViewModel : ViewModelBase
         _settingsService = settingsService;
 
         OpenWorkspaceCommand = new RelayCommand(() => OpenWorkspaceRequested?.Invoke(this, EventArgs.Empty));
+        OpenAudioMonitorCommand = new RelayCommand(() => OpenAudioMonitorRequested?.Invoke(this, EventArgs.Empty));
         OpenPrivacyCommand = new RelayCommand(() => OpenPrivacyRequested?.Invoke(this, EventArgs.Empty));
         OpenSettingsCommand = new RelayCommand(() => OpenSettingsRequested?.Invoke(this, EventArgs.Empty));
 
@@ -41,10 +42,12 @@ public sealed class HomeViewModel : ViewModelBase
     }
 
     public event EventHandler? OpenWorkspaceRequested;
+    public event EventHandler? OpenAudioMonitorRequested;
     public event EventHandler? OpenPrivacyRequested;
     public event EventHandler? OpenSettingsRequested;
 
     public ICommand OpenWorkspaceCommand { get; }
+    public ICommand OpenAudioMonitorCommand { get; }
     public ICommand OpenPrivacyCommand { get; }
     public ICommand OpenSettingsCommand { get; }
 

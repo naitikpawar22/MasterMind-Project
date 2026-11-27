@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
 using GeminiDesktop.ViewModels;
@@ -5,7 +6,7 @@ using GeminiDesktop.ViewModels;
 namespace GeminiDesktop.Views;
 
 /// <summary>
-/// Hosts the WebView2 control and triggers asynchronous initialization when first shown.
+/// Hosts the WebView2 control, triggers async initialization, and keeps live speech transcript auto-scrolled.
 /// </summary>
 public partial class GeminiView : UserControl
 {
@@ -25,12 +26,22 @@ public partial class GeminiView : UserControl
         if (_attachedViewModel is not null)
         {
             _attachedViewModel.ReinitializeRequested -= OnReinitializeRequested;
+            _attachedViewModel.TranscriptEntries.CollectionChanged -= OnTranscriptEntriesChanged;
         }
 
         _attachedViewModel = e.NewValue as GeminiViewModel;
         if (_attachedViewModel is not null)
         {
             _attachedViewModel.ReinitializeRequested += OnReinitializeRequested;
+            _attachedViewModel.TranscriptEntries.CollectionChanged += OnTranscriptEntriesChanged;
+        }
+    }
+
+    private void OnTranscriptEntriesChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == NotifyCollectionChangedAction.Add)
+        {
+            Dispatcher.BeginInvoke(() => TranscriptScrollViewer?.ScrollToBottom());
         }
     }
 

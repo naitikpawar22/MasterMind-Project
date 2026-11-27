@@ -107,24 +107,24 @@
                     </Grid>
                 </Border>
 
-                <!-- Connection / Load Status, Physical Microphone Meter/Mute, & Edge-to-Edge Toggle -->
+                <!-- Connection Status, Quick Microphone & System Audio Meters, Drawer Toggle, & Edge-to-Edge Toggle -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="{Binding StatusText}"
                                FontSize="12"
                                Foreground="{DynamicResource TextMutedBrush}"
                                VerticalAlignment="Center"
-                               MaxWidth="180"
-                               Margin="0,0,10,0"
+                               MaxWidth="140"
+                               Margin="0,0,8,0"
                                TextTrimming="CharacterEllipsis" />
 
-                    <!-- Compact Microphone Mute + Live Level Meter -->
+                    <!-- Compact Physical Microphone Pill (Mute + Level) -->
                     <Border Background="{DynamicResource SurfaceBackgroundBrush}"
                             BorderBrush="{DynamicResource BorderSubtleBrush}"
                             BorderThickness="1"
                             CornerRadius="6"
                             Height="30"
                             Padding="6,0,8,0"
-                            Margin="0,0,8,0"
+                            Margin="0,0,6,0"
                             ToolTip="{Binding MicrophoneTooltip}">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <Button Style="{StaticResource ToolbarIconButtonStyle}"
@@ -137,6 +137,9 @@
                                             <Setter Property="Fill" Value="{DynamicResource StatusSuccessFgBrush}" />
                                             <Setter Property="Data" Value="M12,14 C13.66,14 15,12.66 15,11 V5 C15,3.34 13.66,2 12,2 C10.34,2 9,3.34 9,5 V11 C9,12.66 10.34,14 12,14 Z M17.3,11 C17.3,14 14.76,16.1 12,16.1 C9.24,16.1 6.7,14 6.7,11 H5 C5,14.41 7.72,17.23 11,17.72 V21 H13 V17.72 C16.28,17.23 19,14.41 19,11 H17.3 Z" />
                                             <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsMicrophoneListening}" Value="False">
+                                                    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+                                                </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsMicrophoneMuted}" Value="True">
                                                     <Setter Property="Fill" Value="{DynamicResource StatusDangerFgBrush}" />
                                                     <Setter Property="Data" Value="M19,11 H17.3 C17.3,11.74 17.14,12.43 16.87,13.05 L18.1,14.28 C18.66,13.3 19,12.19 19,11 Z M14.98,11.17 C14.98,11.11 15,11.06 15,11 V5 C15,3.34 13.66,2 12,2 C10.34,2 9,3.34 9,5 V5.18 L14.98,11.17 Z M4.27,3 L3,4.27 L9.01,10.28 V11 C9.01,12.66 10.34,14 12,14 C12.22,14 12.44,13.97 12.65,13.92 L14.31,15.58 C13.6,15.91 12.81,16.1 12,16.1 C9.24,16.1 6.7,14 6.7,11 H5 C5,14.41 7.72,17.23 11,17.72 V21 H13 V17.72 C13.91,17.59 14.77,17.27 15.54,16.82 L19.73,21 L21,19.73 L4.27,3 Z" />
@@ -153,7 +156,7 @@
                                 </Path>
                             </Button>
 
-                            <ProgressBar Width="44"
+                            <ProgressBar Width="38"
                                          Height="6"
                                          Minimum="0"
                                          Maximum="100"
@@ -176,6 +179,98 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- Compact System Audio Loopback Pill (Mute + Level) -->
+                    <Border Background="{DynamicResource SurfaceBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Height="30"
+                            Padding="6,0,8,0"
+                            Margin="0,0,6,0"
+                            ToolTip="{Binding SystemAudioTooltip}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Style="{StaticResource ToolbarIconButtonStyle}"
+                                    Width="24"
+                                    Height="24"
+                                    Command="{Binding ToggleSystemAudioMuteCommand}">
+                                <Path Width="13" Height="13" Stretch="Uniform">
+                                    <Path.Style>
+                                        <Style TargetType="Path">
+                                            <Setter Property="Fill" Value="{DynamicResource AccentPrimaryBrush}" />
+                                            <Setter Property="Data" Value="M3,9 V15 H7 L12,20 V4 L7,9 H3 Z M16.5,12 C16.5,10.23 15.48,8.71 14,7.97 V16.02 C15.48,15.29 16.5,13.77 16.5,12 Z M14,3.23 V5.29 C16.89,6.15 19,8.83 19,12 C19,15.17 16.89,17.85 14,18.71 V20.77 C18.01,19.86 21,16.28 21,12 C21,7.72 18.01,4.14 14,3.23 Z" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsSystemAudioListening}" Value="False">
+                                                    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsSystemAudioMuted}" Value="True">
+                                                    <Setter Property="Fill" Value="{DynamicResource StatusDangerFgBrush}" />
+                                                    <Setter Property="Data" Value="M16.5,12 C16.5,10.23 15.48,8.71 14,7.97 V10.18 L16.45,12.63 C16.48,12.43 16.5,12.22 16.5,12 Z M19,12 C19,12.94 18.8,13.82 18.46,14.64 L19.97,16.15 C20.63,14.91 21,13.5 21,12 C21,7.72 18.01,4.14 14,3.23 V5.29 C16.89,6.15 19,8.83 19,12 Z M4.27,3 L3,4.27 L7.73,9 H3 V15 H7 L12,20 V13.27 L16.25,17.52 C15.58,18.04 14.83,18.45 14,18.7 V20.76 C15.38,20.45 16.63,19.81 17.69,18.95 L19.73,21 L21,19.73 L12,10.73 L4.27,3 Z M12,4 L9.91,6.09 L12,8.18 V4 Z" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsSystemAudioAvailable}" Value="False">
+                                                    <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Path.Style>
+                                </Path>
+                            </Button>
+
+                            <ProgressBar Width="38"
+                                         Height="6"
+                                         Minimum="0"
+                                         Maximum="100"
+                                         Value="{Binding SystemAudioLevelPercent, Mode=OneWay}"
+                                         Background="{DynamicResource BorderSubtleBrush}"
+                                         BorderThickness="0"
+                                         VerticalAlignment="Center"
+                                         Margin="4,0,0,0">
+                                <ProgressBar.Style>
+                                    <Style TargetType="ProgressBar">
+                                        <Setter Property="Foreground" Value="{DynamicResource AccentPrimaryBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsSystemAudioMuted}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ProgressBar.Style>
+                            </ProgressBar>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Dual Audio & Live Transcript Drawer Toggle -->
+                    <Button Command="{Binding ToggleAudioPanelCommand}"
+                            ToolTip="{Binding AudioPanelToggleTooltip}"
+                            Margin="0,0,6,0">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="DrawerBtn"
+                                        Height="30"
+                                        CornerRadius="6"
+                                        BorderThickness="1"
+                                        Padding="10,0">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{DynamicResource SurfaceBackgroundBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtleBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsAudioPanelVisible}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource AccentPrimaryBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <TextBlock Text="Audio &amp; Transcript"
+                                               FontSize="11.5"
+                                               FontWeight="SemiBold"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextPrimaryBrush}" />
+                                </Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
                     <Button Style="{StaticResource ToolbarIconButtonStyle}"
                             Command="{Binding ToggleToolbarCommand}"
                             ToolTip="{Binding ToolbarToggleTooltip}">
@@ -195,7 +290,7 @@
                      IsIndeterminate="True"
                      Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}" />
 
-        <!-- WebView2 Composition Host (supports window opacity) & Recovery Overlays -->
+        <!-- Workspace Body: Left WebView2 Composition Host + Collapsible Right Dual Audio & Live Transcript Panel -->
         <Grid Grid.Row="2">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -236,79 +331,532 @@
                 </Grid>
             </Border>
 
-            <wv2:WebView2CompositionControl x:Name="GeminiWebView"
-                                            Grid.Row="1"
-                                            Visibility="{Binding HasError, Converter={StaticResource InverseBoolToVis}}" />
+            <!-- Split View: Browser Content + Right Dual Audio & Transcript Monitor -->
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
 
-            <!-- Initial Browser Loading Overlay -->
-            <Border Grid.Row="1"
-                    Background="{DynamicResource SurfaceBackgroundBrush}"
-                    Visibility="{Binding IsInitializing, Converter={StaticResource BoolToVis}}">
-                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420">
-                    <TextBlock Text="Initializing MyLaptop Workspace..."
-                               FontSize="16"
-                               FontWeight="SemiBold"
-                               HorizontalAlignment="Center"
-                               Margin="0,0,0,8" />
-                    <TextBlock Text="Starting Microsoft Edge WebView2 with your isolated local session directory."
-                               Style="{StaticResource BodyTextStyle}"
-                               TextAlignment="Center"
-                               Margin="0,0,0,16" />
-                    <ProgressBar Width="220" Height="4" IsIndeterminate="True" Foreground="{DynamicResource AccentPrimaryBrush}" />
-                </StackPanel>
-            </Border>
+                <!-- Browser Canvas -->
+                <Grid Grid.Column="0">
+                    <wv2:WebView2CompositionControl x:Name="GeminiWebView"
+                                                    Visibility="{Binding HasError, Converter={StaticResource InverseBoolToVis}}" />
 
-            <!-- Comprehensive Error & Recovery View -->
-            <Border Grid.Row="1"
-                    Background="{DynamicResource WindowBackgroundBrush}"
-                    Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}">
-                <Border Style="{StaticResource SectionCardStyle}"
-                        MaxWidth="520"
-                        VerticalAlignment="Center"
-                        HorizontalAlignment="Center"
-                        Margin="24">
-                    <StackPanel>
-                        <TextBlock Text="{Binding ErrorTitle}"
-                                   FontSize="18"
-                                   FontWeight="SemiBold"
-                                   Foreground="{DynamicResource TextPrimaryBrush}"
-                                   Margin="0,0,0,8" />
+                    <!-- Initial Browser Loading Overlay -->
+                    <Border Background="{DynamicResource SurfaceBackgroundBrush}"
+                            Visibility="{Binding IsInitializing, Converter={StaticResource BoolToVis}}">
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420">
+                            <TextBlock Text="Initializing MyLaptop Workspace..."
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,0,0,8" />
+                            <TextBlock Text="Starting Microsoft Edge WebView2 with your isolated local session directory."
+                                       Style="{StaticResource BodyTextStyle}"
+                                       TextAlignment="Center"
+                                       Margin="0,0,0,16" />
+                            <ProgressBar Width="220" Height="4" IsIndeterminate="True" Foreground="{DynamicResource AccentPrimaryBrush}" />
+                        </StackPanel>
+                    </Border>
 
-                        <TextBlock Text="{Binding ErrorMessage}"
-                                   Style="{StaticResource BodyTextStyle}"
-                                   Margin="0,0,0,12" />
+                    <!-- Comprehensive Error & Recovery View -->
+                    <Border Background="{DynamicResource WindowBackgroundBrush}"
+                            Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}">
+                        <Border Style="{StaticResource SectionCardStyle}"
+                                MaxWidth="520"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Center"
+                                Margin="24">
+                            <StackPanel>
+                                <TextBlock Text="{Binding ErrorTitle}"
+                                           FontSize="18"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextPrimaryBrush}"
+                                           Margin="0,0,0,8" />
 
-                        <Border Background="{DynamicResource SurfaceSecondaryBrush}"
-                                BorderBrush="{DynamicResource BorderSubtleBrush}"
-                                BorderThickness="1"
-                                CornerRadius="6"
-                                Padding="10,6"
-                                Margin="0,0,0,18"
-                                Visibility="{Binding ErrorCode, Converter={StaticResource StringToVis}}">
-                            <TextBlock Text="{Binding ErrorCode, StringFormat=Diagnostic Code: {0}}"
-                                       FontSize="12"
-                                       Foreground="{DynamicResource TextMutedBrush}" />
+                                <TextBlock Text="{Binding ErrorMessage}"
+                                           Style="{StaticResource BodyTextStyle}"
+                                           Margin="0,0,0,12" />
+
+                                <Border Background="{DynamicResource SurfaceSecondaryBrush}"
+                                        BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10,6"
+                                        Margin="0,0,0,18"
+                                        Visibility="{Binding ErrorCode, Converter={StaticResource StringToVis}}">
+                                    <TextBlock Text="{Binding ErrorCode, StringFormat=Diagnostic Code: {0}}"
+                                               FontSize="12"
+                                               Foreground="{DynamicResource TextMutedBrush}" />
+                                </Border>
+
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Reload Workspace"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Command="{Binding ReloadCommand}"
+                                            Margin="0,0,10,0" />
+
+                                    <Button Content="Return to Home"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Command="{Binding HomeCommand}"
+                                            Margin="0,0,10,0" />
+
+                                    <Button Content="Get WebView2 Runtime"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Command="{Binding OpenWebView2GuideCommand}"
+                                            Visibility="{Binding IsWebView2Available, Converter={StaticResource InverseBoolToVis}}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </Border>
+                </Grid>
+
+                <!-- Collapsible Right Panel: Dual Microphone & System Audio Listener + Real-Time Speech Transcript -->
+                <Border Grid.Column="1"
+                        Width="350"
+                        Visibility="{Binding IsAudioPanelVisible, Converter={StaticResource BoolToVis}}"
+                        Background="{DynamicResource SidebarBackgroundBrush}"
+                        BorderBrush="{DynamicResource BorderSubtleBrush}"
+                        BorderThickness="1,0,0,0">
+                    <Grid Margin="12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Drawer Title & Simultaneous Start/Stop Both -->
+                        <Grid Grid.Row="0" Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="Live Audio &amp; Transcript"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextPrimaryBrush}" />
+                                <TextBlock Text="{Binding TranscriptionStatusText}"
+                                           FontSize="11"
+                                           Foreground="{DynamicResource TextMutedBrush}"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Content="Start Both"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        Padding="9,4"
+                                        FontSize="11.5"
+                                        Command="{Binding StartBothAudioCommand}"
+                                        Margin="0,0,4,0" />
+                                <Button Content="Stop Both"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Padding="8,4"
+                                        FontSize="11.5"
+                                        Command="{Binding StopBothAudioCommand}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Source 1: Microphone Audio Card -->
+                        <Border Grid.Row="1" Style="{StaticResource CompactCardStyle}" Padding="12" Margin="0,0,0,8">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,6,0">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasMicrophoneActivity}" Value="True">
+                                                        <Setter Property="Fill" Value="{DynamicResource StatusSuccessFgBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+                                    <TextBlock Grid.Column="1" Text="Microphone Audio" FontSize="12.5" FontWeight="SemiBold" />
+                                    <Border Grid.Column="2"
+                                            Background="{DynamicResource StatusSuccessBgBrush}"
+                                            BorderBrush="{DynamicResource StatusSuccessBorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="6,1">
+                                        <TextBlock Text="MIC" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource StatusSuccessFgBrush}" />
+                                    </Border>
+                                </Grid>
+
+                                <!-- Device Picker -->
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox Grid.Column="0"
+                                              ItemsSource="{Binding MicrophoneDevices}"
+                                              SelectedValuePath="Id"
+                                              DisplayMemberPath="FriendlyName"
+                                              SelectedValue="{Binding SelectedMicrophoneId, Mode=TwoWay}"
+                                              FontSize="11.5"
+                                              Height="26"
+                                              Padding="6,2"
+                                              Margin="0,0,4,0" />
+                                    <Button Grid.Column="1"
+                                            Content="↻"
+                                            ToolTip="Refresh Microphones"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Command="{Binding RefreshMicrophonesCommand}"
+                                            Padding="8,2"
+                                            FontSize="12" />
+                                </Grid>
+
+                                <!-- Live Mic Meter -->
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="36" />
+                                    </Grid.ColumnDefinitions>
+                                    <ProgressBar Grid.Column="0"
+                                                 Height="8"
+                                                 Minimum="0"
+                                                 Maximum="100"
+                                                 Value="{Binding MicrophoneLevelPercent, Mode=OneWay}"
+                                                 Background="{DynamicResource SurfaceSecondaryBrush}"
+                                                 BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                                 BorderThickness="1"
+                                                 VerticalAlignment="Center">
+                                        <ProgressBar.Style>
+                                            <Style TargetType="ProgressBar">
+                                                <Setter Property="Foreground" Value="{DynamicResource StatusSuccessFgBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsMicrophoneMuted}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </ProgressBar.Style>
+                                    </ProgressBar>
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding MicrophoneLevelPercent, StringFormat={}{0}%}"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center" />
+                                </Grid>
+
+                                <TextBlock Text="{Binding MicrophoneStatusText}"
+                                           FontSize="11"
+                                           Foreground="{DynamicResource TextMutedBrush}"
+                                           TextTrimming="CharacterEllipsis"
+                                           Margin="0,0,0,6" />
+
+                                <!-- Separate Start / Stop / Mute Buttons -->
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Start"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Command="{Binding StartMicrophoneCommand}"
+                                            Padding="10,3"
+                                            FontSize="11.5"
+                                            Margin="0,0,6,0" />
+                                    <Button Content="Stop"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Command="{Binding StopMicrophoneCommand}"
+                                            Padding="10,3"
+                                            FontSize="11.5"
+                                            Margin="0,0,6,0" />
+                                    <Button Content="{Binding MicrophoneMuteActionText}"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Command="{Binding ToggleMicrophoneMuteCommand}"
+                                            Padding="10,3"
+                                            FontSize="11.5" />
+                                </StackPanel>
+                            </StackPanel>
                         </Border>
 
-                        <StackPanel Orientation="Horizontal">
-                            <Button Content="Reload Workspace"
-                                    Style="{StaticResource PrimaryButtonStyle}"
-                                    Command="{Binding ReloadCommand}"
-                                    Margin="0,0,10,0" />
+                        <!-- Source 2: System Audio (Windows Output Loopback) Card -->
+                        <Border Grid.Row="2" Style="{StaticResource CompactCardStyle}" Padding="12" Margin="0,0,0,8">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,6,0">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill" Value="{DynamicResource TextMutedBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasSystemAudioActivity}" Value="True">
+                                                        <Setter Property="Fill" Value="{DynamicResource AccentPrimaryBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+                                    <TextBlock Grid.Column="1" Text="System Audio (PC Output)" FontSize="12.5" FontWeight="SemiBold" />
+                                    <Border Grid.Column="2"
+                                            Background="{DynamicResource AccentSubtleBrush}"
+                                            BorderBrush="{DynamicResource AccentPrimaryBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="6,1">
+                                        <TextBlock Text="SYS" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource AccentTextBrush}" />
+                                    </Border>
+                                </Grid>
 
-                            <Button Content="Return to Home"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Command="{Binding HomeCommand}"
-                                    Margin="0,0,10,0" />
+                                <TextBlock Text="{Binding SystemAudioDeviceName}"
+                                           FontSize="11.5"
+                                           FontWeight="Medium"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           TextTrimming="CharacterEllipsis"
+                                           Margin="0,0,0,6" />
 
-                            <Button Content="Get WebView2 Runtime"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Command="{Binding OpenWebView2GuideCommand}"
-                                    Visibility="{Binding IsWebView2Available, Converter={StaticResource InverseBoolToVis}}" />
-                        </StackPanel>
-                    </StackPanel>
+                                <!-- Live System Audio Meter -->
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="36" />
+                                    </Grid.ColumnDefinitions>
+                                    <ProgressBar Grid.Column="0"
+                                                 Height="8"
+                                                 Minimum="0"
+                                                 Maximum="100"
+                                                 Value="{Binding SystemAudioLevelPercent, Mode=OneWay}"
+                                                 Background="{DynamicResource SurfaceSecondaryBrush}"
+                                                 BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                                 BorderThickness="1"
+                                                 VerticalAlignment="Center">
+                                        <ProgressBar.Style>
+                                            <Style TargetType="ProgressBar">
+                                                <Setter Property="Foreground" Value="{DynamicResource AccentPrimaryBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsSystemAudioMuted}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </ProgressBar.Style>
+                                    </ProgressBar>
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding SystemAudioLevelPercent, StringFormat={}{0}%}"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center" />
+                                </Grid>
+
+                                <TextBlock Text="{Binding SystemAudioStatusText}"
+                                           FontSize="11"
+                                           Foreground="{DynamicResource TextMutedBrush}"
+                                           TextTrimming="CharacterEllipsis"
+                                           Margin="0,0,0,6" />
+
+                                <Border Style="{StaticResource WarningBannerStyle}"
+                                        Padding="8,4"
+                                        Margin="0,0,0,6"
+                                        Visibility="{Binding SystemAudioErrorMessage, Converter={StaticResource StringToVis}}">
+                                    <TextBlock Text="{Binding SystemAudioErrorMessage}" FontSize="11" Foreground="{DynamicResource StatusWarningFgBrush}" TextWrapping="Wrap" />
+                                </Border>
+
+                                <!-- Separate Start / Stop / Mute / Refresh Buttons -->
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Start"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Command="{Binding StartSystemAudioCommand}"
+                                            Padding="10,3"
+                                            FontSize="11.5"
+                                            Margin="0,0,6,0" />
+                                    <Button Content="Stop"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Command="{Binding StopSystemAudioCommand}"
+                                            Padding="10,3"
+                                            FontSize="11.5"
+                                            Margin="0,0,6,0" />
+                                    <Button Content="{Binding SystemAudioMuteActionText}"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Command="{Binding ToggleSystemAudioMuteCommand}"
+                                            ToolTip="Mutes System Audio listener/transcription without muting PC speakers"
+                                            Padding="10,3"
+                                            FontSize="11.5"
+                                            Margin="0,0,6,0" />
+                                    <Button Content="↻"
+                                            ToolTip="Refresh Playback Output"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Command="{Binding RefreshSystemAudioCommand}"
+                                            Padding="8,3"
+                                            FontSize="11.5" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Real-Time Speech-to-Text Transcript Feed -->
+                        <Border Grid.Row="3" Style="{StaticResource CompactCardStyle}" Padding="12">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <!-- Header + Copy / Clear -->
+                                <Grid Grid.Row="0" Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox Grid.Column="0"
+                                              IsChecked="{Binding IsLiveTranscriptionEnabled, Mode=TwoWay}"
+                                              Content="Live Speech-to-Text"
+                                              FontSize="12"
+                                              FontWeight="SemiBold"
+                                              VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <Button Content="Copy"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                Command="{Binding CopyTranscriptCommand}"
+                                                Padding="8,2"
+                                                FontSize="11"
+                                                Margin="0,0,4,0" />
+                                        <Button Content="Clear"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                Command="{Binding ClearTranscriptCommand}"
+                                                Padding="8,2"
+                                                FontSize="11" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Engine Error Banner (if SAPI pack missing) -->
+                                <Border Grid.Row="1"
+                                        Style="{StaticResource WarningBannerStyle}"
+                                        Padding="8,5"
+                                        Margin="0,0,0,6"
+                                        Visibility="{Binding TranscriptionErrorMessage, Converter={StaticResource StringToVis}}">
+                                    <TextBlock Text="{Binding TranscriptionErrorMessage}" FontSize="11" Foreground="{DynamicResource StatusWarningFgBrush}" TextWrapping="Wrap" />
+                                </Border>
+
+                                <!-- Clipboard Notice -->
+                                <TextBlock Grid.Row="2"
+                                           Text="{Binding TranscriptNotice}"
+                                           FontSize="11"
+                                           Foreground="{DynamicResource AccentTextBrush}"
+                                           Margin="0,0,0,4"
+                                           Visibility="{Binding TranscriptNotice, Converter={StaticResource StringToVis}}" />
+
+                                <!-- Live In-Progress Speech Hypotheses -->
+                                <Border Grid.Row="3"
+                                        Background="{DynamicResource SurfaceSecondaryBrush}"
+                                        BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="8,6"
+                                        Margin="0,0,0,6"
+                                        Visibility="{Binding HasAnyLiveHypothesis, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel>
+                                        <TextBlock FontSize="11.5"
+                                                   TextWrapping="Wrap"
+                                                   Visibility="{Binding LiveMicrophoneText, Converter={StaticResource StringToVis}}"
+                                                   Margin="0,0,0,2">
+                                            <Run Text="[Microphone · Listening] " FontWeight="Bold" Foreground="{DynamicResource StatusSuccessFgBrush}" />
+                                            <Run Text="{Binding LiveMicrophoneText, Mode=OneWay}" FontStyle="Italic" />
+                                        </TextBlock>
+                                        <TextBlock FontSize="11.5"
+                                                   TextWrapping="Wrap"
+                                                   Visibility="{Binding LiveSystemAudioText, Converter={StaticResource StringToVis}}">
+                                            <Run Text="[System Audio · Listening] " FontWeight="Bold" Foreground="{DynamicResource AccentTextBrush}" />
+                                            <Run Text="{Binding LiveSystemAudioText, Mode=OneWay}" FontStyle="Italic" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Transcript Entries List + Empty State -->
+                                <Grid Grid.Row="4">
+                                    <TextBlock Text="Waiting for speech... Speak into your microphone or play audio in Chrome, Meet, Zoom, or YouTube while enabled."
+                                               Style="{StaticResource MutedCaptionTextStyle}"
+                                               VerticalAlignment="Center"
+                                               TextAlignment="Center"
+                                               Margin="8"
+                                               Visibility="{Binding HasTranscriptEntries, Converter={StaticResource InverseBoolToVis}}" />
+
+                                    <ScrollViewer x:Name="TranscriptScrollViewer"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  Visibility="{Binding HasTranscriptEntries, Converter={StaticResource BoolToVis}}">
+                                        <ItemsControl ItemsSource="{Binding TranscriptEntries}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="{DynamicResource SurfaceSecondaryBrush}"
+                                                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="6"
+                                                            Padding="8,6"
+                                                            Margin="0,0,0,6">
+                                                        <StackPanel>
+                                                            <Grid Margin="0,0,0,3">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <Border Grid.Column="0" CornerRadius="4" Padding="5,1" Margin="0,0,6,0">
+                                                                    <Border.Style>
+                                                                        <Style TargetType="Border">
+                                                                            <Setter Property="Background" Value="{DynamicResource AccentSubtleBrush}" />
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsMicrophone}" Value="True">
+                                                                                    <Setter Property="Background" Value="{DynamicResource StatusSuccessBgBrush}" />
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </Border.Style>
+                                                                    <TextBlock Text="{Binding SourceLabel}" FontSize="10" FontWeight="Bold">
+                                                                        <TextBlock.Style>
+                                                                            <Style TargetType="TextBlock">
+                                                                                <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}" />
+                                                                                <Style.Triggers>
+                                                                                    <DataTrigger Binding="{Binding IsMicrophone}" Value="True">
+                                                                                        <Setter Property="Foreground" Value="{DynamicResource StatusSuccessFgBrush}" />
+                                                                                    </DataTrigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </TextBlock.Style>
+                                                                    </TextBlock>
+                                                                </Border>
+                                                                <TextBlock Grid.Column="1"
+                                                                           Text="{Binding DeviceName}"
+                                                                           FontSize="10"
+                                                                           Foreground="{DynamicResource TextMutedBrush}"
+                                                                           VerticalAlignment="Center"
+                                                                           TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Grid.Column="2"
+                                                                           Text="{Binding TimeLabel}"
+                                                                           FontSize="10"
+                                                                           Foreground="{DynamicResource TextMutedBrush}"
+                                                                           VerticalAlignment="Center"
+                                                                           Margin="6,0,0,0" />
+                                                            </Grid>
+                                                            <TextBlock Text="{Binding Text}"
+                                                                       FontSize="12"
+                                                                       Foreground="{DynamicResource TextPrimaryBrush}"
+                                                                       TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Border>
-            </Border>
+            </Grid>
         </Grid>
     </Grid>
 </UserControl>

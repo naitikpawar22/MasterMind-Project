@@ -69,6 +69,10 @@ public sealed class MicrophoneServiceTests : IDisposable
 
         public void StopCapture() => StopCalls++;
 
+        public void SetMutedSuppression(bool muted) { }
+
+        public void SetPcmSink(Helpers.Pcm16kSpanHandler? sink) { }
+
         public void EmitLevel(double level) => AudioLevelMeasured?.Invoke(this, level);
         public void EmitDisconnect(Exception ex) => CaptureStoppedUnexpectedly?.Invoke(this, ex);
         public void EmitTopologyChange() => DevicesTopologyChanged?.Invoke(this, EventArgs.Empty);

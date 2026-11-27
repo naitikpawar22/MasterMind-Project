@@ -15,11 +15,13 @@
   ```powershell
   winget install --id JRSoftware.InnoSetup --exact
   ```
-- **Microphone Permissions**: Ensure desktop app microphone access is enabled under **Windows Settings → Privacy & security → Microphone**.
+- **Windows Audio & Speech**:
+  - Enable desktop microphone access under **Windows Settings → Privacy & security → Microphone**.
+  - Ensure a Windows Speech desktop recognition language (e.g., English - US / UK) is installed under **Windows Settings → Time & language → Speech** for real-time transcription.
 
 ## 2. Installing NuGet Dependencies
 
-All NuGet packages (`Microsoft.Extensions.DependencyInjection` `10.0.0`, `Microsoft.Web.WebView2` `1.0.4370.26`, `NAudio.Wasapi` `3.3.0`, `Serilog` `4.4.0`, `Serilog.Sinks.Debug` `3.0.0`, `Serilog.Sinks.File` `7.0.0`, `Microsoft.NET.Test.Sdk` `18.12.0`, `xunit` `2.9.3`, `xunit.runner.visualstudio` `4.0.1`) are restored automatically from NuGet (`https://api.nuget.org/v3/index.json`):
+All NuGet packages (`Microsoft.Extensions.DependencyInjection` `10.0.0`, `Microsoft.Web.WebView2` `1.0.4370.26`, `NAudio.Wasapi` `3.3.0`, `System.Speech` `10.0.15`, `Serilog` `4.4.0`, `Serilog.Sinks.Debug` `3.0.0`, `Serilog.Sinks.File` `7.0.0`, `Microsoft.NET.Test.Sdk` `18.12.0`, `xunit` `2.9.3`, `xunit.runner.visualstudio` `4.0.1`) are restored automatically from NuGet (`https://api.nuget.org/v3/index.json`):
 
 ```powershell
 dotnet restore GeminiDesktop.sln
@@ -39,7 +41,7 @@ Run the desktop application directly from source:
 dotnet run --project GeminiDesktop\GeminiDesktop.csproj -c Release
 ```
 
-Run the automated xUnit test suite:
+Run the automated xUnit & SAPI speech integration test suite:
 
 ```powershell
 dotnet test GeminiDesktop.sln -c Release --verbosity normal

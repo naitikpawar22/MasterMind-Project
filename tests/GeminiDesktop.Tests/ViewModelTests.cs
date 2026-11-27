@@ -86,6 +86,8 @@ public sealed class ViewModelTests : IDisposable
         public bool TrySetEndpointMute(string deviceId, bool muted) => true;
         public void StartCapture(string deviceId) { }
         public void StopCapture() { }
+        public void SetMutedSuppression(bool muted) { }
+        public void SetPcmSink(Pcm16kSpanHandler? sink) { }
         public void Dispose()
         {
             _ = AudioLevelMeasured;
@@ -95,27 +97,101 @@ public sealed class ViewModelTests : IDisposable
         }
     }
 
+    private sealed class StubSystemAudioBackend : ISystemAudioBackend
+    {
+        public event EventHandler<double>? AudioLevelMeasured;
+        public event EventHandler<Exception?>? CaptureStoppedUnexpectedly;
+        public event EventHandler? DevicesTopologyChanged;
+
+        public string? ResolveDefaultRenderDevice(out string friendlyName)
+        {
+            friendlyName = "Speakers (Realtek Audio)";
+            return "spk-1";
+        }
+
+        public void StartLoopbackCapture(string deviceId) { }
+        public void StopCapture() { }
+        public void SetMutedSuppression(bool muted) { }
+        public void SetPcmSink(Pcm16kSpanHandler? sink) { }
+        public void Dispose()
+        {
+            _ = AudioLevelMeasured;
+            _ = CaptureStoppedUnexpectedly;
+            _ = DevicesTopologyChanged;
+        }
+    }
+
+    private sealed class StubSpeechTranscriptionBackend : ISpeechTranscriptionBackend
+    {
+        public event EventHandler<SpeechTranscriptEventArgs>? HypothesisReceived;
+        public event EventHandler<SpeechTranscriptEventArgs>? FinalTranscriptReceived;
+        public event EventHandler<string>? EngineError;
+
+        public bool TryInitialize(out string recognizerDisplayName, out string? errorMessage)
+        {
+            recognizerDisplayName = "Stub English Recognizer";
+            errorMessage = null;
+            return true;
+        }
+
+        public bool StartSource(AudioSourceKind source, string deviceName) => true;
+        public void StopSource(AudioSourceKind source) { }
+        public void PushPcm16k(AudioSourceKind source, ReadOnlySpan<byte> pcm16kMonoBytes) { }
+        public void Dispose()
+        {
+            _ = HypothesisReceived;
+            _ = FinalTranscriptReceived;
+            _ = EngineError;
+        }
+    }
+
+    private (
+        LoggingService Log,
+        SettingsService Settings,
+        WindowManagementService Window,
+        PrivacyService Privacy,
+        MicrophoneService Mic,
+        SystemAudioService SysAudio,
+        SpeechTranscriptionService Transcription,
+        WebViewService WebView,
+        GeminiBrowserService Browser) CreateServices()
+    {
+        var log = new LoggingService(_tempRoot);
+        var settings = new SettingsService(log, _tempRoot, allowRegistryStartupChanges: false);
+        var window = new WindowManagementService(settings, log);
+        var privacy = new PrivacyService(new StubAffinityAdapter(), log);
+        var mic = new MicrophoneService(new StubMicrophoneBackend(), settings, log);
+        mic.Initialize();
+        var sys = new SystemAudioService(new StubSystemAudioBackend(), settings, log);
+        sys.Initialize();
+        var tx = new SpeechTranscriptionService(new StubSpeechTranscriptionBackend(), mic, sys, settings, log);
+        tx.Initialize();
+        var webView = new WebViewService(log, settings, mic);
+        var browser = new GeminiBrowserService(webView, settings, log);
+        return (log, settings, window, privacy, mic, sys, tx, webView, browser);
+    }
+
     [Fact]
     public void SettingsViewModel_RejectsInvalidUrlAndRespectsConfirmationOnReset()
     {
-        using var log = new LoggingService(_tempRoot);
-        var settingsService = new SettingsService(log, _tempRoot, allowRegistryStartupChanges: false);
+        var ctx = CreateServices();
+        using var log = ctx.Log;
+        using var window = ctx.Window;
+        using var mic = ctx.Mic;
+        using var sys = ctx.SysAudio;
+        using var tx = ctx.Transcription;
+        using var wv = ctx.WebView;
+        using var br = ctx.Browser;
         var themeService = new StubThemeService();
-        using var windowService = new WindowManagementService(settingsService, log);
-        var privacyService = new PrivacyService(new StubAffinityAdapter(), log);
-        using var micService = new MicrophoneService(new StubMicrophoneBackend(), settingsService, log);
-        micService.Initialize();
-        using var webViewService = new WebViewService(log, settingsService, micService);
-        using var browserService = new GeminiBrowserService(webViewService, settingsService, log);
         var dialogService = new StubDialogService(confirmResult: false);
 
-        var vm = new SettingsViewModel(settingsService, themeService, windowService, browserService, privacyService, micService, dialogService);
+        var vm = new SettingsViewModel(ctx.Settings, themeService, window, br, ctx.Privacy, mic, sys, tx, dialogService);
 
         vm.GeminiHomepageUrl = "http://insecure.example.com";
         vm.SaveSettingsCommand.Execute(null);
 
         Assert.False(string.IsNullOrWhiteSpace(vm.UrlValidationError));
-        Assert.Equal(AppSettings.DefaultGeminiUrl, settingsService.CurrentSettings.GeminiHomepageUrl);
+        Assert.Equal(AppSettings.DefaultGeminiUrl, ctx.Settings.CurrentSettings.GeminiHomepageUrl);
 
         vm.ResetToDefaultsCommand.Execute(null);
         Assert.Equal(1, dialogService.ConfirmCalls);
@@ -124,28 +200,30 @@ public sealed class ViewModelTests : IDisposable
     [Fact]
     public void MainViewModel_NavigatesBetweenAllFiveSections()
     {
-        using var log = new LoggingService(_tempRoot);
-        var settingsService = new SettingsService(log, _tempRoot, allowRegistryStartupChanges: false);
+        var ctx = CreateServices();
+        using var log = ctx.Log;
+        using var window = ctx.Window;
+        using var mic = ctx.Mic;
+        using var sys = ctx.SysAudio;
+        using var tx = ctx.Transcription;
+        using var wv = ctx.WebView;
+        using var br = ctx.Browser;
         var themeService = new StubThemeService();
-        using var windowService = new WindowManagementService(settingsService, log);
-        var privacyService = new PrivacyService(new StubAffinityAdapter(), log);
-        using var micService = new MicrophoneService(new StubMicrophoneBackend(), settingsService, log);
-        micService.Initialize();
-        using var webViewService = new WebViewService(log, settingsService, micService);
-        using var browserService = new GeminiBrowserService(webViewService, settingsService, log);
         var dialogService = new StubDialogService(confirmResult: true);
 
+        var homeVm = new HomeViewModel(br, ctx.Privacy, ctx.Settings);
+        var geminiVm = new GeminiViewModel(br, mic, sys, tx, ctx.Settings);
         var mainVm = new MainViewModel(
-            settingsService,
-            windowService,
-            privacyService,
-            browserService,
+            ctx.Settings,
+            window,
+            ctx.Privacy,
+            br,
             log,
-            new HomeViewModel(browserService, privacyService, settingsService),
-            new GeminiViewModel(browserService, micService),
-            new SettingsViewModel(settingsService, themeService, windowService, browserService, privacyService, micService, dialogService),
-            new PrivacyViewModel(privacyService, windowService, dialogService),
-            new AboutViewModel(log, browserService));
+            homeVm,
+            geminiVm,
+            new SettingsViewModel(ctx.Settings, themeService, window, br, ctx.Privacy, mic, sys, tx, dialogService),
+            new PrivacyViewModel(ctx.Privacy, window, dialogService),
+            new AboutViewModel(log, br));
 
         mainVm.NavigateCommand.Execute(NavigationSection.GeminiWorkspace);
         Assert.True(mainVm.IsGeminiWorkspaceActive);
@@ -161,34 +239,39 @@ public sealed class ViewModelTests : IDisposable
 
         mainVm.NavigateCommand.Execute(NavigationSection.Home);
         Assert.True(mainVm.IsHomeActive);
+
+        geminiVm.IsAudioPanelVisible = false;
+        homeVm.OpenAudioMonitorCommand.Execute(null);
+        Assert.True(mainVm.IsGeminiWorkspaceActive);
+        Assert.True(geminiVm.IsAudioPanelVisible);
     }
 
     [Fact]
     public void PrivacyMode_UpdatesMainIndicatorAndOpacityControls()
     {
-        using var log = new LoggingService(_tempRoot);
-        var settingsService = new SettingsService(log, _tempRoot, allowRegistryStartupChanges: false);
+        var ctx = CreateServices();
+        using var log = ctx.Log;
+        using var window = ctx.Window;
+        using var mic = ctx.Mic;
+        using var sys = ctx.SysAudio;
+        using var tx = ctx.Transcription;
+        using var wv = ctx.WebView;
+        using var br = ctx.Browser;
         var themeService = new StubThemeService();
-        using var windowService = new WindowManagementService(settingsService, log);
-        var privacyService = new PrivacyService(new StubAffinityAdapter(), log);
-        using var micService = new MicrophoneService(new StubMicrophoneBackend(), settingsService, log);
-        micService.Initialize();
-        using var webViewService = new WebViewService(log, settingsService, micService);
-        using var browserService = new GeminiBrowserService(webViewService, settingsService, log);
         var dialogService = new StubDialogService(confirmResult: true);
 
-        var settingsVm = new SettingsViewModel(settingsService, themeService, windowService, browserService, privacyService, micService, dialogService);
+        var settingsVm = new SettingsViewModel(ctx.Settings, themeService, window, br, ctx.Privacy, mic, sys, tx, dialogService);
         var mainVm = new MainViewModel(
-            settingsService,
-            windowService,
-            privacyService,
-            browserService,
+            ctx.Settings,
+            window,
+            ctx.Privacy,
+            br,
             log,
-            new HomeViewModel(browserService, privacyService, settingsService),
-            new GeminiViewModel(browserService, micService),
+            new HomeViewModel(br, ctx.Privacy, ctx.Settings),
+            new GeminiViewModel(br, mic, sys, tx, ctx.Settings),
             settingsVm,
-            new PrivacyViewModel(privacyService, windowService, dialogService),
-            new AboutViewModel(log, browserService));
+            new PrivacyViewModel(ctx.Privacy, window, dialogService),
+            new AboutViewModel(log, br));
 
         Assert.Equal("Privacy Mode: Off", mainVm.PrivacyIndicatorText);
         Assert.False(mainVm.IsPrivacyIndicatorActive);
@@ -198,15 +281,15 @@ public sealed class ViewModelTests : IDisposable
         Assert.Equal(30, mainVm.BackgroundVisibilityPercent);
         Assert.Equal("Opacity 70% (30% bg)", mainVm.OpacityBadgeText);
 
-        mainVm.SetOpacityPresetCommand.Execute("10"); // Should clamp to minimum 30%
+        mainVm.SetOpacityPresetCommand.Execute("10");
         Assert.Equal(30, mainVm.WindowOpacityPercent);
         Assert.Equal(70, mainVm.BackgroundVisibilityPercent);
 
-        windowService.SetAlwaysOnTop(true);
+        window.SetAlwaysOnTop(true);
         Assert.Contains("Always on Top", mainVm.PrivacyIndicatorText);
         Assert.True(mainVm.IsPrivacyIndicatorActive);
 
-        windowService.SetAlwaysOnTop(false);
+        window.SetAlwaysOnTop(false);
         Assert.Equal("Privacy Mode: Off", mainVm.PrivacyIndicatorText);
         Assert.False(settingsVm.IsPrivacyModeEnabled);
     }
@@ -263,48 +346,48 @@ public sealed class ViewModelTests : IDisposable
     [Fact]
     public void SidebarAndEdgeToEdgeToolbar_ToggleAndPersistState()
     {
-        using var log = new LoggingService(_tempRoot);
-        var settingsService = new SettingsService(log, _tempRoot, allowRegistryStartupChanges: false);
+        var ctx = CreateServices();
+        using var log = ctx.Log;
+        using var window = ctx.Window;
+        using var mic = ctx.Mic;
+        using var sys = ctx.SysAudio;
+        using var tx = ctx.Transcription;
+        using var wv = ctx.WebView;
+        using var br = ctx.Browser;
         var themeService = new StubThemeService();
-        using var windowService = new WindowManagementService(settingsService, log);
-        var privacyService = new PrivacyService(new StubAffinityAdapter(), log);
-        using var micService = new MicrophoneService(new StubMicrophoneBackend(), settingsService, log);
-        micService.Initialize();
-        using var webViewService = new WebViewService(log, settingsService, micService);
-        using var browserService = new GeminiBrowserService(webViewService, settingsService, log);
         var dialogService = new StubDialogService(confirmResult: true);
-        var geminiVm = new GeminiViewModel(browserService, micService);
+        var geminiVm = new GeminiViewModel(br, mic, sys, tx, ctx.Settings);
 
         var mainVm = new MainViewModel(
-            settingsService,
-            windowService,
-            privacyService,
-            browserService,
+            ctx.Settings,
+            window,
+            ctx.Privacy,
+            br,
             log,
-            new HomeViewModel(browserService, privacyService, settingsService),
+            new HomeViewModel(br, ctx.Privacy, ctx.Settings),
             geminiVm,
-            new SettingsViewModel(settingsService, themeService, windowService, browserService, privacyService, micService, dialogService),
-            new PrivacyViewModel(privacyService, windowService, dialogService),
-            new AboutViewModel(log, browserService));
+            new SettingsViewModel(ctx.Settings, themeService, window, br, ctx.Privacy, mic, sys, tx, dialogService),
+            new PrivacyViewModel(ctx.Privacy, window, dialogService),
+            new AboutViewModel(log, br));
 
         Assert.True(mainVm.IsSidebarVisible);
         Assert.True(geminiVm.IsToolbarVisible);
 
         mainVm.ToggleSidebarCommand.Execute(null);
         Assert.False(mainVm.IsSidebarVisible);
-        Assert.False(settingsService.CurrentWindowSettings.IsSidebarExpanded);
+        Assert.False(ctx.Settings.CurrentWindowSettings.IsSidebarExpanded);
 
         mainVm.ToggleSidebarCommand.Execute(null);
         Assert.True(mainVm.IsSidebarVisible);
-        Assert.True(settingsService.CurrentWindowSettings.IsSidebarExpanded);
+        Assert.True(ctx.Settings.CurrentWindowSettings.IsSidebarExpanded);
 
         geminiVm.ToggleToolbarCommand.Execute(null);
         Assert.False(geminiVm.IsToolbarVisible);
 
-        var aboutVm = new AboutViewModel(log, browserService);
+        var aboutVm = new AboutViewModel(log, br);
         Assert.Equal("3.0.0", aboutVm.Version);
 
-        var miniVm = new MiniPopupViewModel(privacyService);
+        var miniVm = new MiniPopupViewModel(ctx.Privacy);
         bool? restoredGeminiFlag = null;
         var dismissed = false;
         miniVm.RestoreRequested += (_, openGemini) => restoredGeminiFlag = openGemini;
